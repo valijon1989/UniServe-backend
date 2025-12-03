@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "apps/uniserve-backend/src",
+  "compilerOptions": {
+    "deleteOutDir": true,
+    "webpack": true,
+    "tsConfigPath": "apps/uniserve-backend/tsconfig.app.json"
+  },
+  "monorepo": true,
+  "root": "apps/uniserve-backend",
+  "projects": {
+    "uniserve-backend": {
+      "type": "application",
+      "root": "apps/uniserve-backend",
+      "entryFile": "main",
+      "sourceRoot": "apps/uniserve-backend/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/uniserve-backend/tsconfig.app.json"
+      }
+    },
+    "api": {
+      "type": "application",
+      "root": "apps/api",
+      "entryFile": "main",
+      "sourceRoot": "apps/api/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/api/tsconfig.app.json"
+      }
+    }
+  }
+}

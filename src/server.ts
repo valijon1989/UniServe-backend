@@ -1,0 +1,86 @@
+import express from "express";
+import cors from "cors";
+import morgan from "morgan";
+import "dotenv/config";
+import path from "path";
+import { connectDb } from "./config/db";
+import authRoutes from "./routes/authRoutes";
+import agentRoutes from "./routes/agentRoutes";
+import productRoutes from "./routes/productRoutes";
+import serviceRoutes from "./routes/serviceRoutes";
+import postRoutes from "./routes/postRoutes";
+import adminRoutes from "./routes/adminRoutes";
+import feedRoutes from "./routes/feedRoutes";
+import agentListingsRoutes from "./routes/agentListingsRoutes";
+import userRoutes from "./routes/userRoutes";
+import { seedIfEmpty } from "./seed";
+
+const app = express();
+
+// Normalize double /api/api prefixes from upstream clients
+app.use((req, _res, next) => {
+  if (req.url.startsWith("/api/api")) {
+    req.url = req.url.replace(/^\/api\/api/, "/api");
+  }
+  next();
+});
+
+const allowedOrigins = ["http://localhost:3000"];
+
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"]
+  })
+);
+app.options("*", cors({ origin: allowedOrigins, credentials: true }));
+app.use(express.json());
+app.use(morgan("dev"));
+
+app.use("/static", express.static(path.join(__dirname, "..", "static")));
+app.get("/", (_req, res) => {
+  res.json({ status: "UniServe backend running" });
+});
+
+// prefix all API routes once to avoid /api/api duplication
+app.use("/api/auth", authRoutes);
+app.use("/api/agents", agentRoutes);
+app.use("/api/products", productRoutes);
+app.use("/api/services", serviceRoutes);
+app.use("/api/posts", postRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/feed", feedRoutes);
+app.use("/api/agent/listings", agentListingsRoutes);
+app.use("/api/user", userRoutes);
+
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("Unhandled error:", err);
+  res.status(500).json({ success: false, message: err?.message || "Internal server error" });
+});
+
+const PORT = 5001;
+const mongoUrl = process.env.MONGO_URL;
+
+if (!mongoUrl) {
+  console.error("❌ MONGO_URL not set in .env");
+  process.exit(1);
+}
+
+async function start(url: string) {
+  try {
+    await connectDb(url);
+    console.log("UniServe DB Connected");
+    await seedIfEmpty();
+
+    app.listen(PORT, () => {
+      console.log(`🚀 UniServe backend running on http://localhost:${PORT}`);
+    });
+  } catch (err) {
+    console.error("Failed to start server:", err);
+    process.exit(1);
+  }
+}
+
+start(mongoUrl);

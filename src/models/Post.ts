@@ -8,9 +8,12 @@ export interface IComment {
 
 export interface IPost extends Document {
   author: mongoose.Types.ObjectId;
+  content?: string;
   text?: string;
   images: string[];
   videoUrl?: string;
+  category?: string;
+  type?: string;
   likes: mongoose.Types.ObjectId[];
   comments: IComment[];
   createdAt: Date;
@@ -29,9 +32,12 @@ const CommentSchema = new Schema<IComment>(
 const PostSchema = new Schema<IPost>(
   {
     author: { type: Schema.Types.ObjectId, ref: "User", required: true },
-    text: { type: String },
+    content: { type: String, default: "" },
+    text: { type: String, default: "" },
     images: [{ type: String }],
     videoUrl: { type: String },
+    category: { type: String, default: "" },
+    type: { type: String, default: "" },
     likes: [{ type: Schema.Types.ObjectId, ref: "User" }],
     comments: [CommentSchema]
   },

@@ -24,7 +24,21 @@ export const feed = async (req: Request, res: Response) => {
       .sort({ createdAt: -1 })
       .limit(50)
       .populate("author", "name username role avatarUrl");
-    return res.json({ posts });
+    const formattedPosts = posts.map((post) => {
+      const plain = post.toObject();
+      return {
+        ...plain,
+        category: plain.category ?? "",
+        type: plain.type ?? "",
+        createdAt: plain.createdAt instanceof Date ? plain.createdAt.toISOString() : plain.createdAt,
+        updatedAt: plain.updatedAt instanceof Date ? plain.updatedAt.toISOString() : plain.updatedAt,
+        comments: plain.comments?.map((comment: any) => ({
+          ...comment,
+          createdAt: comment.createdAt instanceof Date ? comment.createdAt.toISOString() : comment.createdAt
+        }))
+      };
+    });
+    return res.json({ posts: formattedPosts });
   } catch (err) {
     console.error("feed error", err);
     return res.status(500).json({ message: "Server error" });

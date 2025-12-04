@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import morgan from "morgan";
+import cookieParser from "cookie-parser";
 import "dotenv/config";
 import path from "path";
 import { connectDb } from "./config/db";
@@ -37,6 +38,7 @@ app.use(
 );
 app.options("*", cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json());
+app.use(cookieParser());
 app.use(morgan("dev"));
 
 app.use("/static", express.static(path.join(__dirname, "..", "static")));

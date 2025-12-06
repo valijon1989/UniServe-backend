@@ -10,6 +10,9 @@ export interface IProduct extends Document {
   images: string[];
   category: string;
   status: ProductStatus;
+  likes?: number;
+  views?: number;
+  orders?: number;
   createdBy: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -24,6 +27,9 @@ const ProductSchema = new Schema<IProduct>(
     images: [{ type: String }],
     category: { type: String },
     status: { type: String, enum: ["ACTIVE", "SOLD", "BLOCKED"], default: "ACTIVE" },
+    likes: { type: Number, default: 0 },
+    views: { type: Number, default: 0 },
+    orders: { type: Number, default: 0 },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true }
   },
   { timestamps: true }

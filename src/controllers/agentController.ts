@@ -72,3 +72,46 @@ export const listAgents = async (req: Request, res: Response) => {
     return res.status(500).json({ message: "Server error" });
   }
 };
+
+export const topVerifiedAgents = async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 10, 50);
+    const agents = await AgentProfile.aggregate([
+      { $match: { verifiedByAdmin: true } },
+      {
+        $lookup: {
+          from: "users",
+          localField: "user",
+          foreignField: "_id",
+          as: "user"
+        }
+      },
+      { $unwind: "$user" },
+      { $sort: { rating: -1, createdAt: -1 } },
+      { $limit: limit },
+      {
+        $project: {
+          _id: 1,
+          rating: 1,
+          verifiedByAdmin: 1,
+          faceIdVerified: 1,
+          kind: 1,
+          serviceCategory: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          "user._id": 1,
+          "user.name": 1,
+          "user.username": 1,
+          "user.avatarUrl": 1,
+          "user.bio": 1,
+          "user.region": 1
+        }
+      }
+    ]);
+
+    return res.json({ agents, limit });
+  } catch (err) {
+    console.error("topVerifiedAgents error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};

@@ -14,6 +14,7 @@ import adminRoutes from "./routes/adminRoutes";
 import feedRoutes from "./routes/feedRoutes";
 import agentListingsRoutes from "./routes/agentListingsRoutes";
 import userRoutes from "./routes/userRoutes";
+import searchRoutes from "./routes/searchRoutes";
 import { seedIfEmpty } from "./seed";
 
 const app = express();
@@ -26,7 +27,8 @@ app.use((req, _res, next) => {
   next();
 });
 
-const allowedOrigins = ["http://localhost:3000"];
+const allowedOrigins =
+  process.env.FRONTEND_ORIGINS?.split(",").map((o) => o.trim()).filter(Boolean) || ["http://localhost:3000"];
 
 app.use(
   cors({
@@ -56,6 +58,7 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/feed", feedRoutes);
 app.use("/api/agent/listings", agentListingsRoutes);
 app.use("/api/user", userRoutes);
+app.use("/api/search", searchRoutes);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error("Unhandled error:", err);

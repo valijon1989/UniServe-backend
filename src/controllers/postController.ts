@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { PipelineStage } from "mongoose";
 import { Post } from "../models/Post";
 
 export const createPost = async (req: Request, res: Response) => {
@@ -82,6 +83,68 @@ export const commentPost = async (req: Request, res: Response) => {
     return res.json({ post });
   } catch (err) {
     console.error("commentPost error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const topDiscussions = async (req: Request, res: Response) => {
+  try {
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = Math.min(Number(req.query.limit) || 5, 20);
+    const skip = (page - 1) * limit;
+
+    const pipeline: PipelineStage[] = [
+      {
+        $addFields: {
+          likesCount: { $size: { $ifNull: ["$likes", []] } },
+          commentsCount: { $size: { $ifNull: ["$comments", []] } }
+        }
+      },
+      { $sort: { likesCount: -1, commentsCount: -1, createdAt: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+      {
+        $lookup: {
+          from: "users",
+          localField: "author",
+          foreignField: "_id",
+          as: "author"
+        }
+      },
+      { $unwind: { path: "$author", preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          _id: 1,
+          text: 1,
+          content: 1,
+          images: 1,
+          videoUrl: 1,
+          category: 1,
+          type: 1,
+          likesCount: 1,
+          commentsCount: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          "author._id": 1,
+          "author.name": 1,
+          "author.username": 1,
+          "author.avatarUrl": 1
+        }
+      }
+    ];
+
+    const [items, total] = await Promise.all([Post.aggregate(pipeline), Post.countDocuments()]);
+    const totalPages = Math.max(Math.ceil(total / limit), 1);
+
+    return res.json({
+      page,
+      limit,
+      total,
+      totalPages,
+      items
+    });
+  } catch (err) {
+    console.error("topDiscussions error", err);
     return res.status(500).json({ message: "Server error" });
   }
 };

@@ -10,6 +10,9 @@ export interface IService extends Document {
   hourlyRate?: number;
   currency: string;
   location?: string;
+  likes?: number;
+  views?: number;
+  orders?: number;
   createdBy: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -24,6 +27,9 @@ const ServiceSchema = new Schema<IService>(
     hourlyRate: { type: Number },
     currency: { type: String, default: "USD" },
     location: { type: String },
+    likes: { type: Number, default: 0 },
+    views: { type: Number, default: 0 },
+    orders: { type: Number, default: 0 },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true }
   },
   { timestamps: true }

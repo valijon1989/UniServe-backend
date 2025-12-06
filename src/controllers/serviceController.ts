@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { Service } from "../models/Service";
+import { parsePositiveInt } from "../utils/pagination";
 
 export const createService = async (req: Request, res: Response) => {
   try {
@@ -42,6 +43,34 @@ export const myServices = async (req: Request, res: Response) => {
     return res.json({ services });
   } catch (err) {
     console.error("myServices error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const getTrendingServices = async (req: Request, res: Response) => {
+  try {
+    const page = parsePositiveInt(req.query.page, 1, 1000000);
+    const limit = parsePositiveInt(req.query.limit, 9, 50);
+    const skip = (page - 1) * limit;
+
+    const [items, total] = await Promise.all([
+      Service.find({})
+        .sort({ orders: -1, views: -1, likes: -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate("createdBy", "name username role avatarUrl"),
+      Service.countDocuments({})
+    ]);
+
+    return res.json({
+      page,
+      limit,
+      total,
+      totalPages: Math.max(Math.ceil(total / limit), 1),
+      items
+    });
+  } catch (err) {
+    console.error("getTrendingServices error", err);
     return res.status(500).json({ message: "Server error" });
   }
 };

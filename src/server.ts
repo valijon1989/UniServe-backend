@@ -16,6 +16,7 @@ import agentListingsRoutes from "./routes/agentListingsRoutes";
 import userRoutes from "./routes/userRoutes";
 import searchRoutes from "./routes/searchRoutes";
 import { seedIfEmpty } from "./seed";
+import { categoriesHandler } from "./stubs/categories";
 
 const app = express();
 
@@ -52,6 +53,7 @@ app.get("/", (_req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/agents", agentRoutes);
 app.use("/api/products", productRoutes);
+app.get("/api/categories", categoriesHandler);
 app.use("/api/services", serviceRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/admin", adminRoutes);

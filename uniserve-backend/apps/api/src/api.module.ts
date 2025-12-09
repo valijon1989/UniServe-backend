@@ -11,6 +11,7 @@ import { ListingsModule } from './listings/listings.module';
 import { FeedModule } from './feed/feed.module';
 import { AdminModule } from './admin/admin.module';
 import { UploadsModule } from './uploads/uploads.module';
+import { ProductsModule } from './products/products.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { UploadsModule } from './uploads/uploads.module';
     FeedModule,
     AdminModule,
     UploadsModule,
+    ProductsModule,
   ],
   controllers: [ApiController],
   providers: [ApiService],

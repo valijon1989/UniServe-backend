@@ -8,13 +8,22 @@ import {
   myProducts,
   updateProductStatus,
   productDetail,
-  productStat
+  productStat,
+  uploadProductImagesHandler
 } from "../controllers/productController";
 import { authOptional } from "../middlewares/auth";
+import { productImageUpload } from "../middlewares/upload";
 
 const router = Router();
 
 router.post("/", authRequired, roleRequired(["AGENT"]), createProduct);
+router.post(
+  "/upload",
+  authRequired,
+  roleRequired(["AGENT", "ADMIN"]),
+  productImageUpload.array("images", 20),
+  uploadProductImagesHandler
+);
 router.get("/popular", getPopularProducts);
 router.get("/trending", getTrendingProducts);
 router.get("/me", authRequired, roleRequired(["AGENT", "ADMIN"]), myProducts);

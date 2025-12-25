@@ -40,4 +40,10 @@ export class AgentsService {
   async listVerified() {
     return this.agentModel.find({ verificationStatus: 'verified', blocked: { $ne: true } }).populate('user');
   }
+
+  async detail(id: string) {
+    const agent = await this.agentModel.findById(id).populate('user');
+    if (!agent) throw new NotFoundException('Agent not found');
+    return agent;
+  }
 }

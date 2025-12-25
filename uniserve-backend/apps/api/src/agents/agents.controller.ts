@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UploadedFile, UseGuards, UseInterceptors, Req } from '@nestjs/common';
+import { Body, Controller, Get, Post, UploadedFile, UseGuards, UseInterceptors, Req, Param } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
@@ -48,5 +48,10 @@ export class AgentsController {
   @Get()
   list() {
     return this.agentsService.listVerified();
+  }
+
+  @Get(':id')
+  detail(@Param('id') id: string) {
+    return this.agentsService.detail(id);
   }
 }

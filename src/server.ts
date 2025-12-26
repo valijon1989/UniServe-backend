@@ -4,6 +4,7 @@ import morgan from "morgan";
 import cookieParser from "cookie-parser";
 import "dotenv/config";
 import path from "path";
+import { createServer } from "http";
 import { connectDb } from "./config/db";
 import authRoutes from "./routes/authRoutes";
 import agentRoutes from "./routes/agentRoutes";
@@ -15,6 +16,8 @@ import feedRoutes from "./routes/feedRoutes";
 import agentListingsRoutes from "./routes/agentListingsRoutes";
 import userRoutes from "./routes/userRoutes";
 import searchRoutes from "./routes/searchRoutes";
+import taxiRoutes from "./routes/taxiRoutes";
+import { initWebsocket } from "./utils/websocket";
 import { seedIfEmpty } from "./seed";
 import { categoriesHandler } from "./stubs/categories";
 
@@ -61,6 +64,7 @@ app.use("/api/feed", feedRoutes);
 app.use("/api/agent/listings", agentListingsRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/search", searchRoutes);
+app.use("/api/taxi", taxiRoutes);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error("Unhandled error:", err);
@@ -81,8 +85,11 @@ async function start(url: string) {
     console.log("UniServe DB Connected");
     await seedIfEmpty();
 
-    app.listen(PORT, () => {
+    const server = createServer(app);
+    initWebsocket(server);
+    server.listen(PORT, () => {
       console.log(`🚀 UniServe backend running on http://localhost:${PORT}`);
+      console.log(`🔌 WebSocket ready on ws://localhost:${PORT}/ws`);
     });
   } catch (err) {
     console.error("Failed to start server:", err);

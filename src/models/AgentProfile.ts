@@ -1,6 +1,8 @@
 import mongoose, { Schema, Document } from "mongoose";
 
 export type AgentKind = "SELLER" | "SERVICE";
+export type TaxiClass = "standard" | "comfort" | "business" | "limousine";
+export type TaxiStatus = "OFFLINE" | "AVAILABLE" | "BUSY";
 
 export interface IAgentProfile extends Document {
   user: mongoose.Types.ObjectId;
@@ -11,6 +13,19 @@ export interface IAgentProfile extends Document {
   verifiedByAdmin: boolean;
   faceIdVerified: boolean;
   serviceCategory?: "language" | "translation" | "consulting" | "legal" | "delivery" | "taxi" | "repair";
+  taxi?: {
+    vehicleModel?: string;
+    seatCapacity?: number;
+    class?: TaxiClass;
+    features?: string[];
+  };
+  taxiStatus?: TaxiStatus;
+  taxiLocation?: {
+    type: "Point";
+    coordinates: number[];
+  };
+  taxiLastSeenAt?: Date;
+  payoutAccount?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -27,9 +42,24 @@ const AgentProfileSchema = new Schema<IAgentProfile>(
     serviceCategory: {
       type: String,
       enum: ["language", "translation", "consulting", "legal", "delivery", "taxi", "repair"]
-    }
+    },
+    taxi: {
+      vehicleModel: { type: String },
+      seatCapacity: { type: Number },
+      class: { type: String, enum: ["standard", "comfort", "business", "limousine"] },
+      features: [{ type: String }]
+    },
+    taxiStatus: { type: String, enum: ["OFFLINE", "AVAILABLE", "BUSY"], default: "OFFLINE" },
+    taxiLocation: {
+      type: { type: String, enum: ["Point"], default: "Point" },
+      coordinates: { type: [Number], default: [0, 0] }
+    },
+    taxiLastSeenAt: { type: Date },
+    payoutAccount: { type: String }
   },
   { timestamps: true }
 );
+
+AgentProfileSchema.index({ taxiLocation: "2dsphere" });
 
 export const AgentProfile = mongoose.model<IAgentProfile>("AgentProfile", AgentProfileSchema);

@@ -5,7 +5,8 @@ import { User } from "../models/User";
 export const becomeAgent = async (req: Request, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ message: "Not authenticated" });
-    const { kind, socialServices, materialServices, serviceCategory } = req.body;
+    const { kind, socialServices, materialServices, serviceCategory, taxi } = req.body;
+    const allowedSeatCapacities = [4, 7, 9, 13, 20, 30, 40];
 
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: "User not found" });
@@ -17,12 +18,17 @@ export const becomeAgent = async (req: Request, res: Response) => {
     const existing = await AgentProfile.findOne({ user: user._id });
     if (existing) return res.status(400).json({ message: "Agent profile already exists" });
 
+    if (serviceCategory === "taxi" && taxi?.seatCapacity && !allowedSeatCapacities.includes(Number(taxi.seatCapacity))) {
+      return res.status(400).json({ message: "Seat capacity not allowed" });
+    }
+
     const profile = await AgentProfile.create({
       user: user._id,
       kind,
       socialServices: socialServices ?? [],
       materialServices: materialServices ?? [],
-      serviceCategory
+      serviceCategory,
+      taxi: taxi ?? undefined
     });
 
     user.role = "AGENT";

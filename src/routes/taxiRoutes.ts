@@ -3,15 +3,26 @@ import { authRequired, roleRequired } from "../middlewares/auth";
 import {
   acceptTaxiRide,
   agentTaxiRides,
+  agentTaxiOrders,
   completeTaxiRide,
   confirmTaxiRide,
+  createTaxiFeedback,
+  createTaxiListing,
+  createTaxiOrder,
   createTaxiRideRequest,
   estimateTaxiFare,
+  listTaxiFeedbackByListing,
+  listTaxiListings,
   listNearbyRideRequests,
   listNearbyTaxis,
+  myTaxiOrders,
   myTaxiRideRequests,
+  taxiListingDetail,
   taxiDailyEarnings,
   taxiLiveBalance,
+  updateTaxiListing,
+  updateTaxiListingStatus,
+  updateTaxiOrderStatus,
   updateTaxiLocation,
   upsertTaxiProfile
 } from "../controllers/taxiController";
@@ -23,6 +34,20 @@ router.patch("/agents/location", authRequired, roleRequired(["AGENT"]), updateTa
 router.get("/agents/nearby", listNearbyTaxis);
 router.get("/agents/earnings/daily", authRequired, roleRequired(["AGENT"]), taxiDailyEarnings);
 router.get("/agents/balance", authRequired, roleRequired(["AGENT"]), taxiLiveBalance);
+
+router.get("/listings", listTaxiListings);
+router.get("/listings/:id", taxiListingDetail);
+router.post("/listings", authRequired, roleRequired(["AGENT", "ADMIN"]), createTaxiListing);
+router.patch("/listings/:id", authRequired, roleRequired(["AGENT", "ADMIN"]), updateTaxiListing);
+router.patch("/listings/:id/status", authRequired, roleRequired(["AGENT", "ADMIN"]), updateTaxiListingStatus);
+
+router.post("/orders", authRequired, createTaxiOrder);
+router.get("/orders/my", authRequired, myTaxiOrders);
+router.get("/orders/agent", authRequired, roleRequired(["AGENT", "ADMIN"]), agentTaxiOrders);
+router.patch("/orders/:id/status", authRequired, updateTaxiOrderStatus);
+
+router.post("/feedback", authRequired, createTaxiFeedback);
+router.get("/feedback/listing/:id", listTaxiFeedbackByListing);
 
 router.get("/fare/estimate", estimateTaxiFare);
 router.post("/fare/estimate", estimateTaxiFare);

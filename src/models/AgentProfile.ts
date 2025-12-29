@@ -12,6 +12,9 @@ export interface IAgentProfile extends Document {
   rating: number;
   verifiedByAdmin: boolean;
   faceIdVerified: boolean;
+  gender?: "male" | "female" | "other";
+  phone?: string;
+  telegram?: string;
   serviceCategory?: "language" | "translation" | "consulting" | "legal" | "delivery" | "taxi" | "repair";
   taxi?: {
     vehicleModel?: string;
@@ -39,6 +42,9 @@ const AgentProfileSchema = new Schema<IAgentProfile>(
     rating: { type: Number, default: 0 },
     verifiedByAdmin: { type: Boolean, default: false },
     faceIdVerified: { type: Boolean, default: false },
+    gender: { type: String, enum: ["male", "female", "other"] },
+    phone: { type: String },
+    telegram: { type: String },
     serviceCategory: {
       type: String,
       enum: ["language", "translation", "consulting", "legal", "delivery", "taxi", "repair"]

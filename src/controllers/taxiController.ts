@@ -1,6 +1,11 @@
 import { Request, Response } from "express";
+import mongoose from "mongoose";
 import { AgentProfile, TaxiClass } from "../models/AgentProfile";
+import { TaxiFeedback, TaxiFeedbackType } from "../models/TaxiFeedback";
+import { TaxiListing, TaxiListingStatus } from "../models/TaxiListing";
+import { TaxiOrder, TaxiOrderStatus } from "../models/TaxiOrder";
 import { TaxiRide } from "../models/TaxiRide";
+import { parsePositiveInt } from "../utils/pagination";
 import { sendToUser } from "../utils/websocket";
 
 const allowedSeatCapacities = [4, 7, 9, 13, 20, 30, 40];
@@ -64,6 +69,38 @@ function getDailyWindow(dateStr?: string) {
   end.setDate(start.getDate() + 1);
   end.setHours(0, 0, 0, 0);
   return { start, end };
+}
+
+const listingStatusValues: TaxiListingStatus[] = ["active", "paused"];
+const orderStatusValues: TaxiOrderStatus[] = ["pending", "accepted", "rejected", "cancelled", "completed"];
+const feedbackTypes: TaxiFeedbackType[] = ["thanks", "complaint"];
+const agentOrderTransitions: Record<TaxiOrderStatus, TaxiOrderStatus[]> = {
+  pending: ["accepted", "rejected", "completed"],
+  accepted: ["completed"],
+  rejected: [],
+  cancelled: [],
+  completed: []
+};
+const customerOrderTransitions: Record<TaxiOrderStatus, TaxiOrderStatus[]> = {
+  pending: ["cancelled"],
+  accepted: [],
+  rejected: [],
+  cancelled: [],
+  completed: []
+};
+
+function normalizeStringArray(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item)).filter((item) => item.trim().length > 0);
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    return [value.trim()];
+  }
+  return undefined;
+}
+
+function isValidObjectId(value: string) {
+  return mongoose.Types.ObjectId.isValid(value);
 }
 
 export const upsertTaxiProfile = async (req: Request, res: Response) => {
@@ -449,6 +486,351 @@ export const taxiLiveBalance = async (req: Request, res: Response) => {
     return res.json({ balance: payout, currency: defaultCurrency, window: { start, end } });
   } catch (err) {
     console.error("taxiLiveBalance error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const listTaxiListings = async (req: Request, res: Response) => {
+  try {
+    const page = parsePositiveInt(req.query.page, 1, 1000000);
+    const limit = parsePositiveInt(req.query.limit, 12, 100);
+    const skip = (page - 1) * limit;
+    const city = typeof req.query.city === "string" ? req.query.city : undefined;
+    const statusQuery = typeof req.query.status === "string" ? req.query.status : undefined;
+    const status = statusQuery || "active";
+
+    if (status && !listingStatusValues.includes(status as TaxiListingStatus)) {
+      return res.status(400).json({ message: "Invalid status" });
+    }
+
+    const filter: Record<string, unknown> = { status };
+    if (city) filter.city = city;
+
+    const [listings, total] = await Promise.all([
+      TaxiListing.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      TaxiListing.countDocuments(filter)
+    ]);
+
+    return res.json({
+      page,
+      limit,
+      total,
+      totalPages: Math.max(Math.ceil(total / limit), 1),
+      listings
+    });
+  } catch (err) {
+    console.error("listTaxiListings error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const taxiListingDetail = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ message: "Listing not found" });
+    }
+    const listing = await TaxiListing.findById(id);
+    if (!listing) return res.status(404).json({ message: "Listing not found" });
+    const agentProfile = await AgentProfile.findOne({ user: listing.agentId }).select(
+      "user rating gender phone telegram taxi"
+    );
+    return res.json({ listing, agentProfile });
+  } catch (err) {
+    console.error("taxiListingDetail error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const createTaxiListing = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    const languages = normalizeStringArray(req.body.languages);
+    const images = normalizeStringArray(req.body.images);
+    const options = normalizeStringArray(req.body.options);
+    const interiorImages = normalizeStringArray(req.body.interiorImages);
+    const exteriorImages = normalizeStringArray(req.body.exteriorImages);
+    const status =
+      typeof req.body.status === "string" && listingStatusValues.includes(req.body.status as TaxiListingStatus)
+        ? (req.body.status as TaxiListingStatus)
+        : undefined;
+
+    const listing = await TaxiListing.create({
+      agentId: req.user._id,
+      title: req.body.title,
+      city: req.body.city,
+      serviceArea: req.body.serviceArea,
+      carType: req.body.carType,
+      vehicleModel: req.body.vehicleModel,
+      options,
+      plateNumber: req.body.plateNumber,
+      interiorImages,
+      exteriorImages,
+      capacity: parseNumber(req.body.capacity),
+      pricePerHour: parseNumber(req.body.pricePerHour),
+      currency: req.body.currency,
+      rating: parseNumber(req.body.rating),
+      ratingCount: parseNumber(req.body.ratingCount),
+      usedCount: parseNumber(req.body.usedCount),
+      passengersMax: parseNumber(req.body.passengersMax),
+      priceNote: req.body.priceNote,
+      availableHours: req.body.availableHours,
+      languages,
+      phoneOrKakao: req.body.phoneOrKakao,
+      description: req.body.description,
+      images,
+      status
+    });
+
+    return res.status(201).json({ listing });
+  } catch (err) {
+    console.error("createTaxiListing error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const updateTaxiListing = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ message: "Listing not found" });
+    }
+    const listing = await TaxiListing.findById(id);
+    if (!listing) return res.status(404).json({ message: "Listing not found" });
+
+    const isOwner = listing.agentId.toString() === req.user._id;
+    if (!isOwner && req.user.role !== "ADMIN") {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const languages = normalizeStringArray(req.body.languages);
+    const images = normalizeStringArray(req.body.images);
+    const options = normalizeStringArray(req.body.options);
+    const interiorImages = normalizeStringArray(req.body.interiorImages);
+    const exteriorImages = normalizeStringArray(req.body.exteriorImages);
+
+    const updates: Record<string, unknown> = {
+      title: req.body.title,
+      city: req.body.city,
+      serviceArea: req.body.serviceArea,
+      carType: req.body.carType,
+      vehicleModel: req.body.vehicleModel,
+      plateNumber: req.body.plateNumber,
+      capacity: parseNumber(req.body.capacity),
+      pricePerHour: parseNumber(req.body.pricePerHour),
+      currency: req.body.currency,
+      rating: parseNumber(req.body.rating),
+      ratingCount: parseNumber(req.body.ratingCount),
+      usedCount: parseNumber(req.body.usedCount),
+      passengersMax: parseNumber(req.body.passengersMax),
+      priceNote: req.body.priceNote,
+      availableHours: req.body.availableHours,
+      phoneOrKakao: req.body.phoneOrKakao,
+      description: req.body.description
+    };
+    if (languages) updates.languages = languages;
+    if (images) updates.images = images;
+    if (options) updates.options = options;
+    if (interiorImages) updates.interiorImages = interiorImages;
+    if (exteriorImages) updates.exteriorImages = exteriorImages;
+
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value !== undefined) {
+        (listing as any)[key] = value;
+      }
+    });
+
+    await listing.save();
+    return res.json({ listing });
+  } catch (err) {
+    console.error("updateTaxiListing error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const updateTaxiListingStatus = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ message: "Listing not found" });
+    }
+    const listing = await TaxiListing.findById(id);
+    if (!listing) return res.status(404).json({ message: "Listing not found" });
+
+    const isOwner = listing.agentId.toString() === req.user._id;
+    if (!isOwner && req.user.role !== "ADMIN") {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const status = req.body.status as TaxiListingStatus;
+    if (!listingStatusValues.includes(status)) {
+      return res.status(400).json({ message: "Invalid status" });
+    }
+
+    listing.status = status;
+    await listing.save();
+    return res.json({ listing });
+  } catch (err) {
+    console.error("updateTaxiListingStatus error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const createTaxiOrder = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    const { listingId, pickup, dropoff, rideTime, note } = req.body;
+
+    if (!listingId || !isValidObjectId(listingId)) {
+      return res.status(404).json({ message: "Listing not found" });
+    }
+    const listing = await TaxiListing.findById(listingId);
+    if (!listing) return res.status(404).json({ message: "Listing not found" });
+
+    if (!pickup?.address || !dropoff?.address) {
+      return res.status(400).json({ message: "pickup.address and dropoff.address required" });
+    }
+
+    const order = await TaxiOrder.create({
+      listingId: listing._id,
+      agentId: listing.agentId,
+      customerId: req.user._id,
+      pickup: {
+        address: pickup.address,
+        lat: parseNumber(pickup.lat),
+        lng: parseNumber(pickup.lng)
+      },
+      dropoff: {
+        address: dropoff.address,
+        lat: parseNumber(dropoff.lat),
+        lng: parseNumber(dropoff.lng)
+      },
+      rideTime,
+      note
+    });
+
+    return res.status(201).json({ order });
+  } catch (err) {
+    console.error("createTaxiOrder error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const myTaxiOrders = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    const orders = await TaxiOrder.find({ customerId: req.user._id }).sort({ createdAt: -1 });
+    return res.json({ orders });
+  } catch (err) {
+    console.error("myTaxiOrders error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const agentTaxiOrders = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    const match: Record<string, unknown> = {};
+
+    if (req.user.role === "ADMIN") {
+      if (typeof req.query.agentId === "string" && isValidObjectId(req.query.agentId)) {
+        match.agentId = req.query.agentId;
+      }
+    } else {
+      match.agentId = req.user._id;
+    }
+
+    const orders = await TaxiOrder.find(match).sort({ createdAt: -1 });
+    return res.json({ orders });
+  } catch (err) {
+    console.error("agentTaxiOrders error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const updateTaxiOrderStatus = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ message: "Order not found" });
+    }
+
+    const order = await TaxiOrder.findById(id);
+    if (!order) return res.status(404).json({ message: "Order not found" });
+
+    const nextStatus = req.body.status as TaxiOrderStatus;
+    if (!orderStatusValues.includes(nextStatus)) {
+      return res.status(400).json({ message: "Invalid status" });
+    }
+
+    const isAgent = req.user.role === "AGENT";
+    const isCustomer = req.user.role === "USER";
+
+    if (isAgent && order.agentId.toString() !== req.user._id) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    if (isCustomer && order.customerId.toString() !== req.user._id) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    const transitions = isCustomer ? customerOrderTransitions : agentOrderTransitions;
+    const allowedNext = transitions[order.status] || [];
+    if (!allowedNext.includes(nextStatus)) {
+      return res.status(400).json({ message: "Invalid status transition" });
+    }
+
+    order.status = nextStatus;
+    await order.save();
+    return res.json({ order });
+  } catch (err) {
+    console.error("updateTaxiOrderStatus error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const createTaxiFeedback = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    const { listingId, type, message } = req.body;
+
+    if (!listingId || !isValidObjectId(listingId)) {
+      return res.status(404).json({ message: "Listing not found" });
+    }
+    if (!feedbackTypes.includes(type as TaxiFeedbackType)) {
+      return res.status(400).json({ message: "Invalid feedback type" });
+    }
+
+    const listing = await TaxiListing.findById(listingId);
+    if (!listing) return res.status(404).json({ message: "Listing not found" });
+
+    const feedback = await TaxiFeedback.create({
+      listingId: listing._id,
+      agentId: listing.agentId,
+      customerId: req.user._id,
+      type,
+      message
+    });
+
+    return res.status(201).json({ feedback });
+  } catch (err) {
+    console.error("createTaxiFeedback error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const listTaxiFeedbackByListing = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!isValidObjectId(id)) {
+      return res.status(404).json({ message: "Listing not found" });
+    }
+    const items = await TaxiFeedback.find({ listingId: id }).sort({ createdAt: -1 }).limit(100);
+    return res.json({ items });
+  } catch (err) {
+    console.error("listTaxiFeedbackByListing error", err);
     return res.status(500).json({ message: "Server error" });
   }
 };

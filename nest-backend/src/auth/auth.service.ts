@@ -35,6 +35,7 @@ export class AuthService {
       name: dto.name,
       passwordHash,
       role: 'USER',
+      agentIntent: dto.agentIntent || [],
     });
 
     const token = this.sign(user.id, user.role);

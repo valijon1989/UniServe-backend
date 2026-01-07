@@ -1,4 +1,5 @@
-import { IsEmail, IsNotEmpty, MinLength } from 'class-validator';
+import { IsArray, IsEmail, IsIn, IsNotEmpty, IsOptional, MinLength } from 'class-validator';
+import { AgentType } from '../../common/types/agent';
 
 export class RegisterDto {
   @IsEmail()
@@ -13,4 +14,9 @@ export class RegisterDto {
 
   @IsNotEmpty()
   username: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsIn(['LOCAL', 'INTERNATIONAL'], { each: true })
+  agentIntent?: AgentType[];
 }

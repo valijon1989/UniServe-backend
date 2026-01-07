@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Schema as MongooseSchema } from 'mongoose';
+import { AgentType } from '../../common/types/agent';
 
 export type UserRole = 'USER' | 'AGENT' | 'ADMIN';
 
@@ -19,6 +20,9 @@ export class User {
 
   @Prop({ type: String, enum: ['USER', 'AGENT', 'ADMIN'], default: 'USER' })
   role: UserRole;
+
+  @Prop({ type: [String], enum: ['LOCAL', 'INTERNATIONAL'], default: [] })
+  agentIntent?: AgentType[];
 
   @Prop({ default: false })
   isVerified: boolean;

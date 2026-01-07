@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, HydratedDocument, Schema as MongooseSchema } from 'mongoose';
+import { AgentType } from '../common/types/agent';
 
 export type UserDocument = HydratedDocument<User>;
 
@@ -21,6 +22,9 @@ export class User extends Document {
 
   @Prop({ type: String, enum: ['USER', 'AGENT', 'ADMIN'], default: 'USER' })
   role: UserRole;
+
+  @Prop({ type: [String], enum: ['LOCAL', 'INTERNATIONAL'], default: [] })
+  agentIntent?: AgentType[];
 
   @Prop({ type: Boolean, default: false })
   isVerified: boolean;

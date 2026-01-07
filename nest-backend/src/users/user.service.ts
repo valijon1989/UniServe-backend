@@ -34,4 +34,12 @@ export class UserService {
   async createUser(payload: Partial<User>) {
     return this.userModel.create(payload);
   }
+
+  async updateById(id: string, update: Partial<User>) {
+    return this.userModel.findByIdAndUpdate(id, update, { new: true }).exec();
+  }
+
+  async findAdmins() {
+    return this.userModel.find({ role: 'ADMIN' }).select('_id').exec();
+  }
 }

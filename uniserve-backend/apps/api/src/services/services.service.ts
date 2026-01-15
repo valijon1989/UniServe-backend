@@ -148,22 +148,23 @@ export class ServicesService {
       if (priceMax !== undefined) filters.priceMin.$lte = priceMax;
     }
 
+    const categoryFilters: any[] = [];
     if (query.category) {
       const category = await this.resolveCategoryBySlugOrId(query.category);
       if (!category) return { items: [], hasMore: false };
-      if (category.parentId) {
-        filters.category = category.parentId;
-        filters.subCategory = category._id;
-      } else {
-        filters.category = category._id;
-      }
+      const filter = await this.buildCategoryFilter(category);
+      if (filter) categoryFilters.push(filter);
     }
 
     if (query.subCategory) {
       const subCategory = await this.resolveCategoryBySlugOrId(query.subCategory);
       if (!subCategory) return { items: [], hasMore: false };
-      filters.subCategory = subCategory._id;
-      if (subCategory.parentId) filters.category = subCategory.parentId;
+      const filter = await this.buildCategoryFilter(subCategory);
+      if (filter) categoryFilters.push(filter);
+    }
+
+    if (categoryFilters.length) {
+      filters.$and = [...(filters.$and || []), ...categoryFilters];
     }
 
     if (query.providerType) {
@@ -480,6 +481,39 @@ export class ServicesService {
     return this.categoryModel.findOne({ slug: new RegExp(`^${safe}$`, 'i') });
   }
 
+  private async buildCategoryFilter(category: ServiceCategoryDocument | null) {
+    if (!category) return null;
+    const ids = await this.collectDescendantIds(category._id);
+    if (!ids.length) return null;
+    return {
+      $or: [{ category: { $in: ids } }, { subCategory: { $in: ids } }],
+    };
+  }
+
+  private async collectDescendantIds(rootId: Types.ObjectId) {
+    const categories = await this.categoryModel.find({ isActive: { $ne: false } }).select('_id parentId').lean();
+    const childrenMap = new Map<string, string[]>();
+    categories.forEach((cat) => {
+      const parentId = cat.parentId ? String(cat.parentId) : null;
+      if (!parentId) return;
+      const list = childrenMap.get(parentId) || [];
+      list.push(String(cat._id));
+      childrenMap.set(parentId, list);
+    });
+    const ids = new Set<string>();
+    const queue = [String(rootId)];
+    while (queue.length) {
+      const current = queue.pop();
+      if (!current || ids.has(current)) continue;
+      ids.add(current);
+      const children = childrenMap.get(current) || [];
+      children.forEach((child) => {
+        if (!ids.has(child)) queue.push(child);
+      });
+    }
+    return Array.from(ids).map((id) => new Types.ObjectId(id));
+  }
+
   private mapCategoryType(input: string) {
     const normalized = String(input || '').toLowerCase();
     if (['moddiy', 'material', 'materialy'].includes(normalized)) return 'material';
@@ -656,7 +690,7 @@ export class ServicesService {
     const parentDocs = await this.categoryModel.find({ slug: { $in: parents.map((p) => p.slug) } });
     const parentMap = new Map(parentDocs.map((p) => [p.slug, p]));
 
-    const children = [
+    const levelOne = [
       { name: 'Delivery', slug: 'delivery', type: 'material', parentSlug: 'moddiy-xizmatlar', icon: 'ri-truck-line', order: 1 },
       { name: 'Taxi', slug: 'taxi', type: 'material', parentSlug: 'moddiy-xizmatlar', icon: 'ri-taxi-line', order: 2 },
       { name: 'Repair', slug: 'repair', type: 'material', parentSlug: 'moddiy-xizmatlar', icon: 'ri-tools-line', order: 3 },
@@ -664,6 +698,14 @@ export class ServicesService {
       { name: 'Cleaning', slug: 'cleaning', type: 'material', parentSlug: 'moddiy-xizmatlar', icon: 'ri-broom-line', order: 5 },
       { name: 'Moving', slug: 'moving', type: 'material', parentSlug: 'moddiy-xizmatlar', icon: 'ri-home-move-line', order: 6 },
       { name: 'Women Services', slug: 'women-services', type: 'material', parentSlug: 'moddiy-xizmatlar', icon: 'ri-user-heart-line', order: 7 },
+      {
+        name: "Texnik xizmat ko'rsatish",
+        slug: 'texnik-xizmatlar',
+        type: 'material',
+        parentSlug: 'moddiy-xizmatlar',
+        icon: 'ri-tools-fill',
+        order: 8,
+      },
       { name: 'Language', slug: 'language', type: 'social', parentSlug: 'manaviy-xizmatlar', icon: 'ri-book-open-line', order: 1 },
       { name: 'Translation', slug: 'translation', type: 'social', parentSlug: 'manaviy-xizmatlar', icon: 'ri-translate', order: 2 },
       { name: 'Legal', slug: 'legal', type: 'social', parentSlug: 'manaviy-xizmatlar', icon: 'ri-scales-3-line', order: 3 },
@@ -671,7 +713,7 @@ export class ServicesService {
       { name: 'Education', slug: 'education', type: 'social', parentSlug: 'manaviy-xizmatlar', icon: 'ri-graduation-cap-line', order: 5 },
     ];
 
-    const childOps = children.map((c) => ({
+    const levelOneOps = levelOne.map((c) => ({
       updateOne: {
         filter: { slug: c.slug },
         update: {
@@ -689,101 +731,190 @@ export class ServicesService {
       },
     }));
 
-    await this.categoryModel.bulkWrite(childOps, { ordered: false });
+    await this.categoryModel.bulkWrite(levelOneOps, { ordered: false });
+
+    const levelOneDocs = await this.categoryModel.find({ slug: { $in: levelOne.map((c) => c.slug) } });
+    const levelOneMap = new Map(levelOneDocs.map((p) => [p.slug, p]));
+
+    const levelTwo = [
+      { name: "Mashinalarni ta'mirlash", slug: 'mashina-tamir', type: 'material', parentSlug: 'texnik-xizmatlar', icon: 'ri-car-line', order: 1 },
+      {
+        name: "Telefon va kompyuterlar ta'mirlash",
+        slug: 'telefon-kompyuter-tamir',
+        type: 'material',
+        parentSlug: 'texnik-xizmatlar',
+        icon: 'ri-smartphone-line',
+        order: 2,
+      },
+      { name: 'Maishiy vositalar', slug: 'maishiy-vositalar', type: 'material', parentSlug: 'texnik-xizmatlar', icon: 'ri-tv-line', order: 3 },
+      {
+        name: 'Sanoat uskunalari',
+        slug: 'sanoat-uskunalari',
+        type: 'material',
+        parentSlug: 'texnik-xizmatlar',
+        icon: 'ri-factory-line',
+        order: 4,
+      },
+      {
+        name: "Dasturiy ta'minot va IT xizmatlari",
+        slug: 'it-xizmatlar',
+        type: 'material',
+        parentSlug: 'texnik-xizmatlar',
+        icon: 'ri-code-line',
+        order: 5,
+      },
+    ];
+
+    const levelTwoOps = levelTwo.map((c) => ({
+      updateOne: {
+        filter: { slug: c.slug },
+        update: {
+          $setOnInsert: {
+            name: c.name,
+            slug: c.slug,
+            type: c.type,
+            icon: c.icon,
+            order: c.order,
+            isActive: true,
+            parentId: levelOneMap.get(c.parentSlug)?._id || null,
+          },
+        },
+        upsert: true,
+      },
+    }));
+
+    await this.categoryModel.bulkWrite(levelTwoOps, { ordered: false });
+
+    const levelTwoDocs = await this.categoryModel.find({ slug: { $in: levelTwo.map((c) => c.slug) } });
+    const levelTwoMap = new Map(levelTwoDocs.map((p) => [p.slug, p]));
+
+    const levelThree = [
+      { name: 'Ichki mexanizmlar', slug: 'mashina-ichki', type: 'material', parentSlug: 'mashina-tamir', icon: 'ri-settings-3-line', order: 1 },
+      { name: 'Kuzov (tashqi qism)', slug: 'mashina-kuzov', type: 'material', parentSlug: 'mashina-tamir', icon: 'ri-car-washing-line', order: 2 },
+      { name: "Telefon ta'mirlash", slug: 'telefon-tamir', type: 'material', parentSlug: 'telefon-kompyuter-tamir', icon: 'ri-phone-line', order: 1 },
+      { name: "Kompyuter ta'mirlash", slug: 'kompyuter-tamir', type: 'material', parentSlug: 'telefon-kompyuter-tamir', icon: 'ri-computer-line', order: 2 },
+      { name: "Televizor ta'mirlash", slug: 'televizor-tamir', type: 'material', parentSlug: 'maishiy-vositalar', icon: 'ri-tv-2-line', order: 1 },
+      {
+        name: 'Kir yuvish mashinasi',
+        slug: 'kir-yuvish-mashinasi-tamir',
+        type: 'material',
+        parentSlug: 'maishiy-vositalar',
+        icon: 'ri-bubble-chart-line',
+        order: 2,
+      },
+      { name: 'Chang yutgich', slug: 'changyutgich-tamir', type: 'material', parentSlug: 'maishiy-vositalar', icon: 'ri-blur-off-line', order: 3 },
+      { name: 'Konditsioner', slug: 'konditsioner-tamir', type: 'material', parentSlug: 'maishiy-vositalar', icon: 'ri-snowflake-line', order: 4 },
+      { name: 'Stanok va liniyalar', slug: 'stanok-tamir', type: 'material', parentSlug: 'sanoat-uskunalari', icon: 'ri-loader-3-line', order: 1 },
+      { name: 'Generatorlar', slug: 'generator-tamir', type: 'material', parentSlug: 'sanoat-uskunalari', icon: 'ri-flashlight-line', order: 2 },
+      { name: 'Qozonxona va isitish', slug: 'qozonxona-tamir', type: 'material', parentSlug: 'sanoat-uskunalari', icon: 'ri-fire-line', order: 3 },
+      { name: "Dasturiy ta'minot o'rnatish", slug: 'software-install', type: 'material', parentSlug: 'it-xizmatlar', icon: 'ri-download-2-line', order: 1 },
+      { name: 'Tarmoq sozlash', slug: 'tarmoq-sozlash', type: 'material', parentSlug: 'it-xizmatlar', icon: 'ri-wifi-line', order: 2 },
+      { name: 'IT texnik yordam', slug: 'it-yordam', type: 'material', parentSlug: 'it-xizmatlar', icon: 'ri-customer-service-2-line', order: 3 },
+    ];
+
+    const levelThreeOps = levelThree.map((c) => ({
+      updateOne: {
+        filter: { slug: c.slug },
+        update: {
+          $setOnInsert: {
+            name: c.name,
+            slug: c.slug,
+            type: c.type,
+            icon: c.icon,
+            order: c.order,
+            isActive: true,
+            parentId: levelTwoMap.get(c.parentSlug)?._id || null,
+          },
+        },
+        upsert: true,
+      },
+    }));
+
+    await this.categoryModel.bulkWrite(levelThreeOps, { ordered: false });
   }
 
   private async ensureSeedServices() {
-    const existing = await this.serviceModel.exists({ slug: { $regex: /^seed-/ } });
-    if (existing) return;
-
     await this.ensureSeedCategories();
     const categories = await this.categoryModel.find({ parentId: { $ne: null } }).lean();
+    const allCategories = await this.categoryModel.find().lean();
     const parentMap = new Map<string, any>();
-    const parents = await this.categoryModel.find({ parentId: null }).lean();
-    parents.forEach((p) => parentMap.set(String(p._id), p as any));
+    allCategories.forEach((p) => parentMap.set(String(p._id), p as any));
 
-    const imageMap: Record<string, string[]> = {
-      delivery: [
-        'https://images.unsplash.com/photo-1529070538774-1843cb3265df?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1523726491678-bf852e717f6a?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1580674287403-831bf135a935?auto=format&fit=crop&w=900&q=80',
-      ],
-      taxi: [
-        'https://images.unsplash.com/photo-1489515217757-5fd1be406fef?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?auto=format&fit=crop&w=900&q=80',
-      ],
-      repair: [
-        'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1517433456452-f9633a875f6f?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1517059224940-d4af9eec41b7?auto=format&fit=crop&w=900&q=80',
-      ],
-      construction: [
-        'https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1504306662754-72f9811a3f4d?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=900&q=80',
-      ],
-      cleaning: [
-        'https://images.unsplash.com/photo-1581578731548-c64695cc6952?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1527515637462-daf5b1c07da1?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1523413651479-597eb2da0ad6?auto=format&fit=crop&w=900&q=80',
-      ],
-      moving: [
-        'https://images.unsplash.com/photo-1520594923568-1fe0b1b8e3d4?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1522143049013-251975e4d0de?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=900&q=80',
-      ],
-      'women-services': [
-        'https://images.unsplash.com/photo-1516627145497-ae6968895b74?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1504151932400-72d4384f04b3?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1492724441997-5dc865305da7?auto=format&fit=crop&w=900&q=80',
-      ],
-      language: [
-        'https://images.unsplash.com/photo-1524995997946-a1c2e315a42f?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1503676382389-4809596d5290?auto=format&fit=crop&w=900&q=80',
-      ],
-      translation: [
-        'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1455390582262-044cdead277a?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1491841550275-ad7854e35ca6?auto=format&fit=crop&w=900&q=80',
-      ],
-      legal: [
-        'https://images.unsplash.com/photo-1520607162513-77705c0f0d4a?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1528747045269-390fe33c19f2?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?auto=format&fit=crop&w=900&q=80',
-      ],
-      consulting: [
-        'https://images.unsplash.com/photo-1521790797524-b2497295b8a0?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=900&q=80',
-      ],
-      education: [
-        'https://images.unsplash.com/photo-1503676260728-1c00da094a0b?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1503676382389-4809596d5290?auto=format&fit=crop&w=900&q=80',
-        'https://images.unsplash.com/photo-1524995997946-a1c2e315a42f?auto=format&fit=crop&w=900&q=80',
-      ],
+    const keywordMap: Record<string, string> = {
+      delivery: 'courier delivery',
+      taxi: 'taxi service',
+      repair: 'repair workshop',
+      construction: 'construction tools',
+      cleaning: 'cleaning service',
+      moving: 'moving service',
+      'women-services': 'wellness service',
+      language: 'language teacher',
+      translation: 'translation desk',
+      legal: 'legal consultation',
+      consulting: 'business consulting',
+      education: 'education classroom',
+      'texnik-xizmatlar': 'technical service',
+      'mashina-tamir': 'car repair',
+      'mashina-ichki': 'engine repair',
+      'mashina-kuzov': 'auto body repair',
+      'telefon-kompyuter-tamir': 'electronics repair',
+      'telefon-tamir': 'phone repair',
+      'kompyuter-tamir': 'computer repair',
+      'maishiy-vositalar': 'home appliance repair',
+      'televizor-tamir': 'tv repair',
+      'kir-yuvish-mashinasi-tamir': 'washing machine repair',
+      'changyutgich-tamir': 'vacuum cleaner repair',
+      'konditsioner-tamir': 'air conditioner repair',
+      'sanoat-uskunalari': 'industrial equipment',
+      'stanok-tamir': 'industrial machinery',
+      'generator-tamir': 'generator maintenance',
+      'qozonxona-tamir': 'boiler service',
+      'it-xizmatlar': 'it services',
+      'software-install': 'software installation',
+      'tarmoq-sozlash': 'network setup',
+      'it-yordam': 'it support',
     };
+
+    const buildSeededImageUrl = (keyword: string, seed: string, size: string) =>
+      `https://source.unsplash.com/featured/${size}?${encodeURIComponent(keyword)}&sig=${encodeURIComponent(seed)}`;
 
     for (const category of categories) {
       const parent = parentMap.get(String(category.parentId));
       if (!parent) continue;
-      const images = imageMap[category.slug] || [];
+      const keyword = keywordMap[category.slug] || String(category.slug || '').replace(/-/g, ' ');
       const providerType = category.type;
 
       const agents = [];
-      for (let idx = 0; idx < 2; idx += 1) {
+      for (let idx = 0; idx < 3; idx += 1) {
         const agentEmail = `agent-${category.slug}-${idx + 1}@demo.local`;
         let user = await this.userModel.findOne({ email: agentEmail });
+        const avatarUrl = buildSeededImageUrl(`${keyword} person`, `${category.slug}-agent-${idx + 1}`, '400x400');
         if (!user) {
           user = await this.userModel.create({
             name: `${category.name} agent ${idx + 1}`,
             email: agentEmail,
             password: 'Password123!',
             role: 'AGENT',
-            avatarUrl: `https://images.unsplash.com/photo-1544723795-3fb6469f5b39?auto=format&fit=crop&w=400&q=80`,
+            avatarUrl,
             bio: `${category.name} boyicha tajribali mutaxassis.`,
           });
+        } else {
+          let updateNeeded = false;
+          if (user.avatarUrl !== avatarUrl) {
+            user.avatarUrl = avatarUrl;
+            updateNeeded = true;
+          }
+          if (user.name !== `${category.name} agent ${idx + 1}`) {
+            user.name = `${category.name} agent ${idx + 1}`;
+            updateNeeded = true;
+          }
+          if (user.bio !== `${category.name} boyicha tajribali mutaxassis.`) {
+            user.bio = `${category.name} boyicha tajribali mutaxassis.`;
+            updateNeeded = true;
+          }
+          if (updateNeeded) {
+            await user.save();
+          }
         }
 
         let agent = await this.agentModel.findOne({ user: user._id });
@@ -795,15 +926,19 @@ export class ServicesService {
             displayName: user.name,
             avatarUrl: user.avatarUrl,
             verificationStatus: 'verified',
-            rating: 4.3 + (idx % 2 ? 0.2 : 0.4),
-            ratingCount: 10 + idx * 3,
+            rating: 4.2 + idx * 0.2,
+            ratingCount: 12 + idx * 4,
             stats: {
-              completed: 25 + idx * 5,
-              likes: 15 + idx * 4,
-              shares: 6 + idx * 2,
-              followers: 40 + idx * 8,
+              completed: 28 + idx * 6,
+              likes: 18 + idx * 5,
+              shares: 7 + idx * 3,
+              followers: 45 + idx * 9,
             },
           });
+        } else if (agent.avatarUrl !== user.avatarUrl || agent.displayName !== user.name) {
+          agent.avatarUrl = user.avatarUrl;
+          agent.displayName = user.name;
+          await agent.save();
         }
         agents.push(agent);
       }
@@ -812,7 +947,11 @@ export class ServicesService {
         const slug = `seed-${category.slug}-${idx + 1}`;
         const agent = agents[idx % agents.length];
         const priceBase = 50000 + idx * 10000;
-        const media = images.map((url) => ({ type: 'image', url }));
+        const media = Array.from({ length: 3 }, (_, mediaIdx) => ({
+          type: 'image',
+          url: buildSeededImageUrl(keyword, `${category.slug}-svc-${idx + 1}-${mediaIdx + 1}`, '900x600'),
+        }));
+        const images = media.map((item) => item.url);
         await this.serviceModel.updateOne(
           { slug },
           {

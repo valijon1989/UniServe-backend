@@ -2,9 +2,12 @@ import { Router } from "express";
 import { authRequired, roleRequired } from "../middlewares/auth";
 import {
   becomeAgent,
+  getAgentDetail,
+  listAgentReviews,
   listAgents,
   myAgentProfile,
   topVerifiedAgents,
+  upsertAgentReview,
   verifyFaceId
 } from "../controllers/agentController";
 
@@ -15,5 +18,8 @@ router.post("/verify-faceid", authRequired, roleRequired(["AGENT"]), verifyFaceI
 router.get("/me", authRequired, roleRequired(["AGENT"]), myAgentProfile);
 router.get("/top", topVerifiedAgents);
 router.get("/", listAgents);
+router.get("/:id", getAgentDetail);
+router.get("/:id/reviews", listAgentReviews);
+router.post("/:id/reviews", authRequired, upsertAgentReview);
 
 export default router;

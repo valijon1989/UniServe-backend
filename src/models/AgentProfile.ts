@@ -10,12 +10,23 @@ export interface IAgentProfile extends Document {
   socialServices: string[];
   materialServices: string[];
   rating: number;
+  ratingCount: number;
+  profileViews: number;
+  profileLikes: number;
   verifiedByAdmin: boolean;
   faceIdVerified: boolean;
   gender?: "male" | "female" | "other";
   phone?: string;
   telegram?: string;
-  serviceCategory?: "language" | "translation" | "consulting" | "legal" | "delivery" | "taxi" | "repair";
+  serviceCategory?: "language" | "translation" | "consulting" | "legal" | "delivery" | "taxi" | "repair" | "education" | "construction";
+  educationCategories?: string[];
+  educationLanguages?: string[];
+  educationSkills?: string[];
+  educationSpecialties?: string[];
+  constructionAreas?: string[];
+  constructionServices?: string[];
+  serviceOfficeAddress?: string;
+  serviceQualification?: string;
   taxi?: {
     vehicleModel?: string;
     seatCapacity?: number;
@@ -40,15 +51,26 @@ const AgentProfileSchema = new Schema<IAgentProfile>(
     socialServices: [{ type: String }],
     materialServices: [{ type: String }],
     rating: { type: Number, default: 0 },
+    ratingCount: { type: Number, default: 0 },
+    profileViews: { type: Number, default: 0 },
+    profileLikes: { type: Number, default: 0 },
     verifiedByAdmin: { type: Boolean, default: false },
     faceIdVerified: { type: Boolean, default: false },
     gender: { type: String, enum: ["male", "female", "other"] },
     phone: { type: String },
     telegram: { type: String },
-    serviceCategory: {
-      type: String,
-      enum: ["language", "translation", "consulting", "legal", "delivery", "taxi", "repair"]
-    },
+  serviceCategory: {
+    type: String,
+    enum: ["language", "translation", "consulting", "legal", "delivery", "taxi", "repair", "education", "construction"]
+  },
+  educationCategories: [{ type: String }],
+  educationLanguages: [{ type: String }],
+  educationSkills: [{ type: String }],
+  educationSpecialties: [{ type: String }],
+  constructionAreas: [{ type: String }],
+  constructionServices: [{ type: String }],
+  serviceOfficeAddress: { type: String },
+  serviceQualification: { type: String },
     taxi: {
       vehicleModel: { type: String },
       seatCapacity: { type: Number },

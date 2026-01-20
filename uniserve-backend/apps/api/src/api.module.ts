@@ -12,6 +12,7 @@ import { FeedModule } from './feed/feed.module';
 import { AdminModule } from './admin/admin.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { ProductsModule } from './products/products.module';
+import { JobsModule } from './jobs/jobs.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { ProductsModule } from './products/products.module';
     AdminModule,
     UploadsModule,
     ProductsModule,
+    JobsModule,
   ],
   controllers: [ApiController],
   providers: [ApiService],

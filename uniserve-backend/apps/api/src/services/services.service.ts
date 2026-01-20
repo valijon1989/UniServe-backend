@@ -706,6 +706,14 @@ export class ServicesService {
         icon: 'ri-tools-fill',
         order: 8,
       },
+      {
+        name: "Ish topib berish",
+        slug: 'ish-topish',
+        type: 'material',
+        parentSlug: 'moddiy-xizmatlar',
+        icon: 'ri-briefcase-4-line',
+        order: 9,
+      },
       { name: 'Language', slug: 'language', type: 'social', parentSlug: 'manaviy-xizmatlar', icon: 'ri-book-open-line', order: 1 },
       { name: 'Translation', slug: 'translation', type: 'social', parentSlug: 'manaviy-xizmatlar', icon: 'ri-translate', order: 2 },
       { name: 'Legal', slug: 'legal', type: 'social', parentSlug: 'manaviy-xizmatlar', icon: 'ri-scales-3-line', order: 3 },
@@ -763,6 +771,8 @@ export class ServicesService {
         icon: 'ri-code-line',
         order: 5,
       },
+      { name: 'Doimiy ishlar', slug: 'doimiy-ishlar', type: 'material', parentSlug: 'ish-topish', icon: 'ri-building-4-line', order: 1 },
+      { name: 'Vaqtinchalik ishlar', slug: 'vaqtinchalik-ishlar', type: 'material', parentSlug: 'ish-topish', icon: 'ri-timer-line', order: 2 },
     ];
 
     const levelTwoOps = levelTwo.map((c) => ({
@@ -853,6 +863,9 @@ export class ServicesService {
       legal: 'legal consultation',
       consulting: 'business consulting',
       education: 'education classroom',
+      'ish-topish': 'job placement',
+      'doimiy-ishlar': 'factory worker',
+      'vaqtinchalik-ishlar': 'temporary job',
       'texnik-xizmatlar': 'technical service',
       'mashina-tamir': 'car repair',
       'mashina-ichki': 'engine repair',

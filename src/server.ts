@@ -17,6 +17,8 @@ import agentListingsRoutes from "./routes/agentListingsRoutes";
 import userRoutes from "./routes/userRoutes";
 import searchRoutes from "./routes/searchRoutes";
 import taxiRoutes from "./routes/taxiRoutes";
+import educationRoutes from "./routes/educationRoutes";
+import constructionRoutes from "./routes/constructionRoutes";
 import { initWebsocket } from "./utils/websocket";
 import { seedIfEmpty } from "./seed";
 import { categoriesHandler } from "./stubs/categories";
@@ -65,6 +67,8 @@ app.use("/api/agent/listings", agentListingsRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api/taxi", taxiRoutes);
+app.use("/api/education", educationRoutes);
+app.use("/api/construction", constructionRoutes);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error("Unhandled error:", err);

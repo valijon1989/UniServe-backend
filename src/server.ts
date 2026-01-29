@@ -19,6 +19,7 @@ import searchRoutes from "./routes/searchRoutes";
 import taxiRoutes from "./routes/taxiRoutes";
 import educationRoutes from "./routes/educationRoutes";
 import constructionRoutes from "./routes/constructionRoutes";
+import mediaRoutes from "./routes/mediaRoutes";
 import { initWebsocket } from "./utils/websocket";
 import { seedIfEmpty } from "./seed";
 import { categoriesHandler } from "./stubs/categories";
@@ -69,6 +70,7 @@ app.use("/api/search", searchRoutes);
 app.use("/api/taxi", taxiRoutes);
 app.use("/api/education", educationRoutes);
 app.use("/api/construction", constructionRoutes);
+app.use("/api/media", mediaRoutes);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error("Unhandled error:", err);

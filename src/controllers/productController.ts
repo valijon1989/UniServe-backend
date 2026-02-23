@@ -4,252 +4,15 @@ import { parsePositiveInt } from "../utils/pagination";
 import mongoose from "mongoose";
 import dayjs from "dayjs";
 import path from "path";
-
-type StubProduct = {
-  slug: string;
-  name: string;
-  price: number;
-  images: string[];
-  description: string;
-  category: string;
-  subCategory?: string;
-  oldPrice?: number;
-  brand?: string;
-  condition?: string;
-  badges?: string[];
-  highlights?: string[];
-  delivery?: {
-    type?: string;
-    fee?: number;
-    estimated?: string;
-    promise?: string;
-    origin?: string;
-    freeReturn?: boolean;
-    address?: string;
-  };
-  seller?: {
-    name?: string;
-    rating?: number;
-    reviewCount?: number;
-    sales?: number;
-    contact?: string;
-    isOfficial?: boolean;
-    badges?: string[];
-  };
-  benefits?: {
-    coupons?: { label: string; description: string }[];
-    installment?: { months: number[]; partner: string; minPrice: number };
-    delivery?: string;
-  };
-  specs?: { label: string; value: string }[];
-  options?: { name: string; values: string[]; defaultValue?: string }[];
-  policies?: {
-    returnWindow?: string;
-    exchange?: string;
-    warranty?: string;
-    support?: string;
-  };
-  stock?: number;
-  rating?: { avg: number; count: number };
-  stats?: { views: number; likes: number; purchases: number };
-};
-
-const fallbackImage =
-  "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=800&q=80";
-const stubImage = (slug: string) =>
-  `https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=800&q=80&slug=${slug}`;
-const stubImages = (slug: string) => [
-  `${stubImage(slug)}&i=1`,
-  `${stubImage(slug)}&i=2`,
-  `${stubImage(slug)}&i=3`
-];
-const baseStats = { views: 120, likes: 15, purchases: 6 };
-const baseRating = { avg: 4.3, count: 12 };
-const stubProducts: StubProduct[] = [
-  {
-    slug: "pc-1",
-    name: "Office PC",
-    price: 2800000,
-    oldPrice: 3200000,
-    images: stubImages("pc-1"),
-    description: "Office uchun balanslangan kompyuter (Core i5, 16GB RAM, 512GB SSD)",
-    category: "elektronika",
-    subCategory: "pc",
-    brand: "Lenovo",
-    condition: "Yangi",
-    rating: baseRating,
-    stats: baseStats,
-    highlights: ["Core i5 + 16GB RAM", "Windows 11 Pro", "2 yillik kafolat"],
-    specs: [
-      { label: "Processor", value: "Intel Core i5-12400" },
-      { label: "Xotira", value: "16GB DDR4" },
-      { label: "Saqlash", value: "512GB SSD" },
-      { label: "OS", value: "Windows 11 Pro" }
-    ],
-    options: [
-      { name: "Xotira", values: ["8GB", "16GB"], defaultValue: "16GB" },
-      { name: "Disk", values: ["256GB SSD", "512GB SSD"], defaultValue: "512GB SSD" }
-    ],
-    policies: { warranty: "24 oy rasmiy kafolat" }
-  },
-  {
-    slug: "cam-1",
-    name: "Camcorder 4K",
-    price: 3200000,
-    oldPrice: 3550000,
-    images: stubImages("cam-1"),
-    description: "4K videokamera, barqarorlashtirish va keng burchakli ob'ektiv bilan",
-    category: "elektronika",
-    subCategory: "texnika",
-    brand: "Sony",
-    condition: "Yangi",
-    rating: baseRating,
-    stats: { views: 45, likes: 9, purchases: 3 },
-    highlights: ["4K 60fps videoyozuv", "Ovoz uchun ikki kanalli mikrofon", "Barqarorlashtirish va auto-focus"],
-    specs: [
-      { label: "Video", value: "4K 60fps / FHD 120fps" },
-      { label: "Sensor", value: "1/2.3\" CMOS" },
-      { label: "Stabilizatsiya", value: "OIS + EIS" },
-      { label: "Xotira", value: "SDXC (256GB gacha)" }
-    ],
-    options: [{ name: "Komplekt", values: ["Solo", "Extra batareya"], defaultValue: "Solo" }],
-    policies: { warranty: "12 oy rasmiy kafolat" }
-  },
-  {
-    slug: "pc-2",
-    name: "Mini PC",
-    price: 2600000,
-    oldPrice: 2950000,
-    images: stubImages("pc-2"),
-    description: "Ixcham mini PC (Ryzen 5, 16GB, 512GB SSD) ofis va kassalar uchun",
-    category: "elektronika",
-    subCategory: "pc",
-    brand: "Beelink",
-    condition: "Yangi",
-    rating: baseRating,
-    stats: baseStats,
-    highlights: ["Palm-top dizayn", "4K dual display", "Wi-Fi 6"],
-    specs: [
-      { label: "Processor", value: "AMD Ryzen 5 5600H" },
-      { label: "Xotira", value: "16GB DDR4" },
-      { label: "Saqlash", value: "512GB NVMe SSD" },
-      { label: "Video chiqish", value: "HDMI 2.0 x2" }
-    ],
-    options: [{ name: "Saqlash", values: ["512GB", "1TB"], defaultValue: "512GB" }]
-  },
-  {
-    slug: "pc-3",
-    name: "Gaming PC",
-    price: 4500000,
-    oldPrice: 5200000,
-    images: stubImages("pc-3"),
-    description: "RTX 3060 bilan o'yin va dizayn uchun kuchli desktop",
-    category: "elektronika",
-    subCategory: "pc",
-    brand: "MSI",
-    condition: "Yangi",
-    rating: baseRating,
-    stats: baseStats,
-    highlights: ["RTX 3060 12GB", "Ryzen 7 5700X", "ARGB sovutish"],
-    specs: [
-      { label: "Video karta", value: "NVIDIA RTX 3060 12GB" },
-      { label: "Processor", value: "AMD Ryzen 7 5700X" },
-      { label: "Xotira", value: "16GB DDR4 3600MHz" },
-      { label: "Saqlash", value: "1TB NVMe SSD" }
-    ],
-    options: [{ name: "Operativ xotira", values: ["16GB", "32GB"], defaultValue: "16GB" }]
-  },
-  {
-    slug: "mobile-2",
-    name: "mobile-2",
-    price: 100000,
-    oldPrice: 115000,
-    images: stubImages("mobile-2"),
-    description: "mobile-2 (stub) — tez yetkazib beriladigan demo mahsulot",
-    category: "oziq-ovqat",
-    subCategory: "tayyor-maxsulotlar",
-    brand: "UniServe Demo",
-    condition: "Yangi",
-    rating: baseRating,
-    stats: { views: 18, likes: 4, purchases: 2 },
-    highlights: ["Kategoriya: oziq-ovqat", "Demo mahsulot tafsilotlari", "Tez yetkazib berish mavjud"],
-    specs: [
-      { label: "Kategoriya", value: "oziq-ovqat" },
-      { label: "Sub-kategoriya", value: "tayyor mahsulotlar" },
-      { label: "Holati", value: "Yangi" }
-    ]
-  },
-  {
-    slug: "ready-1",
-    name: "Tayyor taom box",
-    price: 115000,
-    oldPrice: 135000,
-    images: stubImages("ready-1"),
-    description: "Sog'lom va to'yimli tayyor taom: guruch, tovuq va sabzavotlar",
-    category: "oziq-ovqat",
-    subCategory: "tayyor-maxsulotlar",
-    brand: "UniServe Kitchen",
-    condition: "Yangi",
-    rating: baseRating,
-    stats: baseStats,
-    highlights: ["Protein: 34g", "Kaloriya: 520 kcal", "1 porsiya"],
-    specs: [
-      { label: "Og'irligi", value: "450 g" },
-      { label: "Saqlash muddati", value: "5 kun, +2°C +6°C" },
-      { label: "Tarkibi", value: "Tovuqli guruch, brokkoli, sous" }
-    ],
-    options: [{ name: "Achchiqlik darajasi", values: ["Mild", "Medium", "Hot"], defaultValue: "Medium" }],
-    policies: { returnWindow: "Yopiq qadoq va chetlanmagan holda 24 soat" }
-  },
-  {
-    slug: "ready-2",
-    name: "Tayyor salat",
-    price: 65000,
-    oldPrice: 78000,
-    images: stubImages("ready-2"),
-    description: "Grecheskiy salat yangi sabzavotlar va feta pishlog'i bilan",
-    category: "oziq-ovqat",
-    subCategory: "tayyor-maxsulotlar",
-    brand: "UniServe Kitchen",
-    condition: "Yangi",
-    rating: baseRating,
-    stats: baseStats,
-    highlights: ["Vitaminlarga boy", "Past kaloriya", "1 porsiya"],
-    specs: [
-      { label: "Og'irligi", value: "320 g" },
-      { label: "Saqlash muddati", value: "3 kun, +2°C +6°C" },
-      { label: "Tarkibi", value: "Bodring, pamidor, feta, zaytun" }
-    ]
-  },
-  {
-    slug: "ready-3",
-    name: "Tayyor sho'rva",
-    price: 85000,
-    images: stubImages("ready-3"),
-    description: "Krem sho'rva, qo'ziqorin va qaymoqli retsept bo'yicha",
-    category: "oziq-ovqat",
-    subCategory: "tayyor-maxsulotlar",
-    brand: "UniServe Kitchen",
-    condition: "Yangi",
-    rating: baseRating,
-    stats: baseStats,
-    highlights: ["Past kaloriyali", "1 porsiya", "Qaymoqli ta'm"],
-    specs: [
-      { label: "Og'irligi", value: "400 g" },
-      { label: "Saqlash muddati", value: "4 kun, +2°C +6°C" },
-      { label: "Tarkibi", value: "Qo'ziqorin, qaymoq, bulon" }
-    ]
-  },
-  { slug: "frag-1", name: "Atir", price: 520000, images: [stubImage("frag-1")], description: "Fragrance demo", category: "gozallik", subCategory: "atirlar", rating: baseRating, stats: baseStats },
-  { slug: "skin-1", name: "Yuz kremi", price: 220000, images: [stubImage("skin-1")], description: "Skin care demo", category: "gozallik", subCategory: "yuz-kremlari", rating: baseRating, stats: baseStats },
-  { slug: "car-1", name: "Sedan 2020", price: 145000000, images: [stubImage("car-1")], description: "Car demo", category: "avto-texnika", subCategory: "avtomobil", rating: baseRating, stats: baseStats },
-  { slug: "carpart-1", name: "Tormoz diski", price: 1800000, images: [stubImage("carpart-1")], description: "Car part demo", category: "avto-texnika", subCategory: "avtomobil-extiyot-qismlari", rating: baseRating, stats: baseStats },
-  { slug: "tech-1", name: "Notebook i7", price: 9500000, images: [stubImage("tech-1")], description: "Tech demo", category: "avto-texnika", subCategory: "texnika", rating: baseRating, stats: baseStats },
-  { slug: "vac-1", name: "Chang yutkich", price: 1450000, images: [stubImage("vac-1")], description: "Vacuum demo", category: "maishiy-uskunalar", subCategory: "chang-yutkich", rating: baseRating, stats: baseStats },
-  { slug: "wash-1", name: "Kir yuvish mashinasi", price: 4200000, images: [stubImage("wash-1")], description: "Washer demo", category: "maishiy-uskunalar", subCategory: "kir-yuvish", rating: baseRating, stats: baseStats },
-  { slug: "men-1", name: "Erkaklar T-shirt", price: 180000, images: [stubImage("men-1")], description: "Men wear", category: "kiyim-kechak", subCategory: "erkaklar", rating: baseRating, stats: baseStats },
-  { slug: "women-1", name: "Ayollar bluzka", price: 210000, images: [stubImage("women-1")], description: "Women wear", category: "kiyim-kechak", subCategory: "ayollar", rating: baseRating, stats: baseStats }
-];
+import { ensureAbsoluteUrl } from "../utils/imageHelpers";
+import { slugify } from "../utils/slug";
+import {
+  isLocalImageUrl,
+  isRandomUnsplashUrl,
+  localImageExists,
+  resolveCoverImage,
+  sanitizeImageArray
+} from "../utils/resolveCoverImage";
 
 type DeliveryInfo = {
   type: string;
@@ -273,6 +36,9 @@ type SellerInfo = {
 
 const formatDateRange = (fromDays = 1, toDays = 2) =>
   `${dayjs().add(fromDays, "day").format("MMM D")} - ${dayjs().add(toDays, "day").format("MMM D")}`;
+
+const DUPLICATE_GUARD_WINDOW_MS = Number(process.env.DUPLICATE_GUARD_WINDOW_MS || 15_000);
+const PRODUCT_FALLBACK = ensureAbsoluteUrl("/images/fallback-product.png") || "http://localhost:5001/images/fallback-product.png";
 
 const defaultSeller: SellerInfo = {
   name: "UniServe Mall",
@@ -389,13 +155,115 @@ const buildDetailSections = (
   { title: "Qaytarish va kafolat", items: [policies.returnWindow, policies.exchange, policies.warranty, policies.support] }
 ];
 
-const normalizeImages = (p: any) => {
-  const provided = (p.images || []).filter(Boolean).slice(0, 20);
-  const filled = provided.length ? [...provided] : [fallbackImage];
-  while (filled.length < 3 && filled.length < 20) {
-    filled.push(filled[filled.length - 1]);
+const normalizeImages = (p: any): string[] => {
+  return sanitizeImageArray(p?.images);
+};
+
+const normalizeText = (value: unknown): string => String(value || "").trim().toLowerCase();
+
+const buildUniqueProductSlug = async (title: string) => {
+  const base = slugify(title) || "product";
+  const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const existing = await Product.find({ slug: { $regex: `^${escaped}(?:-\\d+)?$`, $options: "i" } })
+    .select("slug")
+    .lean();
+  const used = new Set(
+    existing
+      .map((item: any) => String(item.slug || "").toLowerCase())
+      .filter(Boolean)
+  );
+  if (!used.has(base)) return base;
+  let index = 2;
+  while (used.has(`${base}-${index}`)) index += 1;
+  return `${base}-${index}`;
+};
+
+const LEGACY_PRODUCT_SLUG_MAP: Record<string, string> = {
+  "pc-1": "office-pc",
+  "pc-2": "mini-pc",
+  "pc-3": "gaming-pc",
+  "game-1": "gaming-pc",
+  "mobile-1": "mobile-2",
+  "mobile-3": "mobile-2",
+  "kids-cloth-1": "kiyim-kechak-product-1",
+  "ready-1": "tayyor-taom-box",
+  "ready-2": "tayyor-salat",
+  "ready-3": "tayyor-shorva",
+  "cam-1": "camcorder-4k",
+  "frag-1": "atir",
+  "skin-1": "yuz-kremi",
+  "car-1": "sedan-2020",
+  "carpart-1": "tormoz-diski",
+  "tech-1": "notebook-i7",
+  "vac-1": "chang-yutkich",
+  "vac-2": "maishiy-uskunalar-product-1",
+  "wash-1": "kir-yuvish-mashinasi",
+  "oth-2": "oziq-ovqat-product-1",
+  "men-1": "erkaklar-t-shirt",
+  "women-1": "ayollar-bluzka"
+};
+
+const buildIdentifierTokens = (identifier: string): string[] =>
+  identifier
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .map((token) => token.trim())
+    .filter((token) => token && !/^\\d+$/.test(token));
+
+const inferLegacyCategory = (tokens: string[]): string | null => {
+  if (!tokens.length) return null;
+  const joined = tokens.join(" ");
+  if (tokens.includes("vac") || joined.includes("vacuum")) return "maishiy-uskunalar";
+  if (tokens.includes("kids") || tokens.includes("cloth") || joined.includes("clothes")) return "kiyim-kechak";
+  if (tokens.includes("mobile") || tokens.includes("ready") || tokens.includes("oth") || tokens.includes("food")) {
+    return "oziq-ovqat";
   }
-  return filled.slice(0, 20);
+  if (tokens.includes("pc") || tokens.includes("game") || tokens.includes("cam") || joined.includes("tech")) return "elektronika";
+  return null;
+};
+
+const findProductByLegacyIdentifier = async (identifier: string) => {
+  const alias = LEGACY_PRODUCT_SLUG_MAP[identifier.toLowerCase()];
+  if (alias) {
+    const byAlias = await Product.findOne({ slug: alias }).populate("createdBy", "name username role avatarUrl");
+    if (byAlias) return byAlias;
+  }
+
+  const tokens = buildIdentifierTokens(identifier);
+  if (!tokens.length) return null;
+  const pattern = tokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  if (!pattern) return null;
+
+  const candidates = await Product.find({
+    $or: [{ slug: { $regex: pattern, $options: "i" } }, { title: { $regex: pattern, $options: "i" } }]
+  })
+    .sort({ createdAt: -1 })
+    .limit(20)
+    .populate("createdBy", "name username role avatarUrl");
+
+  if (!candidates.length) return null;
+
+  const scored = candidates
+    .map((item) => {
+      const hay = `${String(item.slug || "")} ${String(item.title || "")}`.toLowerCase();
+      const score = tokens.reduce((acc, token) => (hay.includes(token) ? acc + 1 : acc), 0);
+      return { item, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  if (scored[0]?.score > 0) return scored[0].item;
+
+  const inferredCategory = inferLegacyCategory(tokens);
+  if (inferredCategory) {
+    const byCategory = await Product.findOne({ category: inferredCategory, status: "ACTIVE" })
+      .sort({ createdAt: -1 })
+      .populate("createdBy", "name username role avatarUrl");
+    if (byCategory) return byCategory;
+  }
+
+  return await Product.findOne({ status: "ACTIVE" })
+    .sort({ createdAt: -1 })
+    .populate("createdBy", "name username role avatarUrl");
 };
 
 const toDetailDto = (p: any) => {
@@ -403,6 +271,7 @@ const toDetailDto = (p: any) => {
   const price = Number(p.price || 0);
   const oldPrice = p.oldPrice ?? (price ? Math.round(price * 1.12) : undefined);
   const rating = p.rating || { avg: 0, count: 0 };
+  const ratingCount = Number(p.ratingCount ?? rating.count ?? 0);
   const stats = p.stats || { views: p.views || 0, likes: p.likes || 0, purchases: p.orders || 0 };
   const delivery = buildDeliveryInfo(p);
   const seller = buildSellerInfo(p);
@@ -415,17 +284,28 @@ const toDetailDto = (p: any) => {
   const detailSections = buildDetailSections(highlights, specs, delivery, seller, policies);
   const reviewSummary = buildReviewSummary(p);
   const images = normalizeImages(p);
+  const coverImageUrl = resolveCoverImage(p);
 
   return {
+    _id: p._id?.toString?.() ?? p.id ?? p.slug,
     id: p._id?.toString?.() ?? p.slug ?? p.id,
+    type: "product",
+    title: name,
     name,
     description: p.description || "",
     price,
     currency: p.currency || "UZS",
     oldPrice,
-    thumbnail: p.thumbnail || images[0] || fallbackImage,
+    thumbnail: coverImageUrl,
+    image: coverImageUrl,
+    imageUrl: coverImageUrl,
+    coverImage: coverImageUrl,
+    cardImageUrl: coverImageUrl,
+    coverImageUrl,
     images,
     rating,
+    ratingAvg: Number(p.ratingAvg ?? rating.avg ?? 0),
+    ratingCount: Number.isFinite(ratingCount) ? ratingCount : 0,
     reviewSummary,
     stats,
     category: p.category,
@@ -445,6 +325,7 @@ const toDetailDto = (p: any) => {
     options,
     policies,
     stock: p.stock ?? p.quantity ?? 24,
+    createdAt: p.createdAt ? new Date(p.createdAt) : undefined,
     detailSections
   };
 };
@@ -452,20 +333,59 @@ const toDetailDto = (p: any) => {
 export const createProduct = async (req: Request, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ message: "Not authenticated" });
-    const { title, description, price, currency, images, category } = req.body;
+    const { title, description, price, currency, images, category, coverImageUrl, imageUrl, slug } = req.body;
     if (!title || !price) {
       return res.status(400).json({ message: "title and price required" });
     }
     if (!Array.isArray(images) || images.length < 3 || images.length > 20) {
       return res.status(400).json({ message: "images must contain between 3 and 20 items" });
     }
+    if (
+      isRandomUnsplashUrl(coverImageUrl) ||
+      isRandomUnsplashUrl(imageUrl) ||
+      images.some((img: unknown) => isRandomUnsplashUrl(typeof img === "string" ? img : (img as any)?.url))
+    ) {
+      return res.status(400).json({ message: "Random Unsplash image URLs are not allowed" });
+    }
+
+    const numericPrice = Number(price);
+    const windowStart = new Date(Date.now() - DUPLICATE_GUARD_WINDOW_MS);
+    const recentProducts = await Product.find({
+      createdBy: req.user._id,
+      createdAt: { $gte: windowStart }
+    })
+      .select("title category price createdAt")
+      .lean();
+
+    const normalizedTitle = normalizeText(title);
+    const normalizedCategory = normalizeText(category);
+    const duplicate = recentProducts.find(
+      (item) =>
+        normalizeText(item.title) === normalizedTitle &&
+        normalizeText(item.category) === normalizedCategory &&
+        Number(item.price) === numericPrice
+    );
+    if (duplicate) {
+      return res.status(409).json({ message: "Duplicate product creation blocked" });
+    }
+
+    const finalImages = sanitizeImageArray(images);
+    const finalCoverImageUrl = resolveCoverImage({ coverImageUrl, imageUrl, images: finalImages }) || PRODUCT_FALLBACK;
+    if (isLocalImageUrl(finalCoverImageUrl) && !localImageExists(finalCoverImageUrl)) {
+      return res.status(400).json({ message: "coverImageUrl points to a missing local file" });
+    }
+    const finalSlug = typeof slug === "string" && slug.trim() ? slugify(slug) : await buildUniqueProductSlug(title);
+
     const product = await Product.create({
       title,
+      slug: finalSlug || undefined,
       description,
       price,
       currency: currency || "USD",
-      images: images || [],
+      images: finalImages.map((img: string) => ensureAbsoluteUrl(img) || img),
       category,
+      coverImageUrl: finalCoverImageUrl,
+      cardImageUrl: finalCoverImageUrl,
       createdBy: req.user._id
     });
     return res.status(201).json({ product });
@@ -477,9 +397,27 @@ export const createProduct = async (req: Request, res: Response) => {
 
 export const listProducts = async (req: Request, res: Response) => {
   try {
-    // Return only stubbed catalog to avoid duplicate keys and keep consistent slugs
-    const products = stubProducts.map((s) => toDetailDto(s));
-    return res.json({ products });
+    const page = parsePositiveInt(req.query.page, 1, 1000000);
+    const limit = parsePositiveInt(req.query.limit, 24, 50);
+    const skip = (page - 1) * limit;
+
+    const [items, total] = await Promise.all([
+      Product.find({})
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate("createdBy", "name username role avatarUrl"),
+      Product.countDocuments({})
+    ]);
+
+    const products = items.map((p) => toDetailDto(p));
+    return res.json({
+      page,
+      limit,
+      total,
+      totalPages: Math.max(Math.ceil(total / limit), 1),
+      products
+    });
   } catch (err) {
     console.error("listProducts error", err);
     return res.status(500).json({ message: "Server error" });
@@ -488,31 +426,19 @@ export const listProducts = async (req: Request, res: Response) => {
 
 export const productDetail = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
-    let product: any = null;
-    if (mongoose.Types.ObjectId.isValid(id)) {
-      product = await Product.findById(id).populate("createdBy", "name username role");
-    }
+    const identifier = String(req.params.identifier || req.params.id || "").trim();
+    if (!identifier) return res.status(400).json({ message: "Product identifier is required" });
+    const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const titleCandidate = identifier.replace(/-/g, " ").trim();
+    let product = mongoose.Types.ObjectId.isValid(identifier)
+      ? await Product.findById(identifier).populate("createdBy", "name username role avatarUrl")
+      : await Product.findOne({
+          $or: [{ slug: identifier.toLowerCase() }, { title: { $regex: `^${escaped}$`, $options: "i" } }, { title: titleCandidate }]
+        }).populate("createdBy", "name username role avatarUrl");
     if (!product) {
-      const stub = stubProducts.find((s) => s.slug === id);
-      if (stub) {
-        product = stub;
-      }
+      product = await findProductByLegacyIdentifier(identifier);
     }
-    if (!product) {
-      const fallback = {
-        slug: id,
-        name: id,
-        price: 100000,
-        images: [stubImage(id)],
-        description: `${id} (stub)`,
-        category: "oziq-ovqat",
-        subCategory: "tayyor-maxsulotlar",
-        rating: baseRating,
-        stats: { views: 0, likes: 0, purchases: 0 }
-      };
-      return res.json(toDetailDto(fallback));
-    }
+    if (!product) return res.status(404).json({ message: "Product not found" });
     return res.json(toDetailDto(product));
   } catch (err) {
     console.error("productDetail error", err);
@@ -522,36 +448,33 @@ export const productDetail = async (req: Request, res: Response) => {
 
 export const productStat = async (req: Request, res: Response) => {
   try {
-    const { id, action } = req.params;
+    const identifier = String(req.params.id || req.params.identifier || "").trim();
+    const { action } = req.params;
     if (action !== "view" && !req.user) {
       return res.status(401).json({ message: "Login required" });
     }
 
-    let product: any = null;
-    if (mongoose.Types.ObjectId.isValid(id)) {
-      product = await Product.findById(id);
-    }
+    if (!identifier) return res.status(400).json({ message: "Product identifier is required" });
+    const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const titleCandidate = identifier.replace(/-/g, " ").trim();
+    let product = mongoose.Types.ObjectId.isValid(identifier)
+      ? await Product.findById(identifier)
+      : await Product.findOne({
+          $or: [{ slug: identifier.toLowerCase() }, { title: { $regex: `^${escaped}$`, $options: "i" } }, { title: titleCandidate }]
+        });
     if (!product) {
-      const stub = stubProducts.find((s) => s.slug === id);
-      if (stub) {
-        product = stub;
-      }
+      product = await findProductByLegacyIdentifier(identifier);
     }
-    if (!product) {
-      product = {
-        _id: id,
-        stats: { views: 0, likes: 0, purchases: 0 }
-      };
-    }
+    if (!product) return res.status(404).json({ message: "Product not found" });
 
-    const stats = product.stats || { views: product.views || 0, likes: product.likes || 0, purchases: product.orders || 0 };
+    const stats = { views: product.views || 0, likes: product.likes || 0, purchases: product.orders || 0 };
     if (action === "view") stats.views = (stats.views || 0) + 1;
     if (action === "like") stats.likes = (stats.likes || 0) + 1;
     if (action === "purchase") stats.purchases = (stats.purchases || 0) + 1;
-    if (product.slug) {
-      const stub = stubProducts.find((s) => s.slug === product.slug);
-      if (stub) stub.stats = stats;
-    }
+    product.views = stats.views || 0;
+    product.likes = stats.likes || 0;
+    product.orders = stats.purchases || 0;
+    await product.save();
     return res.json({ stats });
   } catch (err) {
     console.error("productStat error", err);
@@ -605,12 +528,14 @@ export const getPopularProducts = async (req: Request, res: Response) => {
       Product.countDocuments({})
     ]);
 
+    const products = items.map((p) => toDetailDto(p));
+
     return res.json({
       page,
       limit,
       total,
       totalPages: Math.max(Math.ceil(total / limit), 1),
-      items
+      items: products
     });
   } catch (err) {
     console.error("getPopularProducts error", err);
@@ -633,12 +558,14 @@ export const getTrendingProducts = async (req: Request, res: Response) => {
       Product.countDocuments({})
     ]);
 
+    const products = items.map((p) => toDetailDto(p));
+
     return res.json({
       page,
       limit,
       total,
       totalPages: Math.max(Math.ceil(total / limit), 1),
-      items
+      items: products
     });
   } catch (err) {
     console.error("getTrendingProducts error", err);
@@ -652,9 +579,10 @@ export const uploadProductImagesHandler = async (req: Request, res: Response) =>
     if (!files.length) {
       return res.status(400).json({ message: "Hech qanday rasm yuklanmadi" });
     }
-    const urls = files.map((file: any) =>
-      `/static/products/${path.basename(file.filename || file.path || file.originalname)}`
-    );
+    const urls = files.map((file: any) => {
+      const relative = `/static/products/${path.basename(file.filename || file.path || file.originalname)}`;
+      return ensureAbsoluteUrl(relative) || relative;
+    });
     return res.status(201).json({ urls, count: urls.length });
   } catch (err) {
     console.error("uploadProductImagesHandler error", err);

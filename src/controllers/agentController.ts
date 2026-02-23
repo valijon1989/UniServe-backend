@@ -2,13 +2,12 @@ import { Request, Response } from "express";
 import { isValidObjectId, PipelineStage } from "mongoose";
 import { AgentProfile } from "../models/AgentProfile";
 import { User } from "../models/User";
+import { AgentReview } from "../models/AgentReview";
 import { Product } from "../models/Product";
 import { Service } from "../models/Service";
-import { EducationListing } from "../models/EducationListing";
-import { ConstructionListing } from "../models/ConstructionListing";
-import { TaxiListing } from "../models/TaxiListing";
-import { AgentReview } from "../models/AgentReview";
 import { parsePositiveInt } from "../utils/pagination";
+import { resolveAvatarUrl } from "../utils/avatarImage";
+import { resolveCoverImage, sanitizeImageArray } from "../utils/resolveCoverImage";
 
 const constructionAreas = ["interior", "exterior"];
 const constructionServices = [
@@ -151,6 +150,8 @@ export const listAgents = async (req: Request, res: Response) => {
     const username = typeof req.query.username === "string" ? req.query.username.trim() : "";
     const activeParam = typeof req.query.active === "string" ? req.query.active : "true";
     const activeOnly = !["false", "0", "no"].includes(activeParam.toLowerCase());
+    const verifiedParam = typeof req.query.verified === "string" ? req.query.verified : "";
+    const verifiedOnly = ["true", "1", "yes"].includes(verifiedParam.toLowerCase());
     const sortMode = typeof req.query.sort === "string" ? req.query.sort : "rating";
 
     const sortOptions: Record<string, PipelineStage.Sort["$sort"]> = {
@@ -162,56 +163,169 @@ export const listAgents = async (req: Request, res: Response) => {
       rating: { rating: -1, ratingCount: -1, createdAt: -1 }
     };
     const sortStage = sortOptions[sortMode] ?? sortOptions.rating;
+    const withListingsParam = typeof req.query.withListings === "string" ? req.query.withListings : "";
+    const withListingsOnly = ["true", "1", "yes"].includes(withListingsParam.toLowerCase());
 
     const userSearch = search || username;
-    const userMatch: Record<string, any> = { role: "AGENT" };
+    const userMatch: Record<string, any> = { "user.role": "AGENT" };
     if (userSearch) {
       const regex = new RegExp(userSearch, "i");
-      userMatch.$or = [{ username: regex }, { name: regex }];
+      userMatch.$or = [{ "user.username": regex }, { "user.name": regex }];
     }
-    if (activeOnly) {
-      userMatch.isVerified = true;
-    }
-
     const matchProfile: Record<string, any> = {};
-    if (activeOnly) {
+    if (verifiedOnly) {
+      userMatch["user.isVerified"] = true;
       matchProfile.verifiedByAdmin = true;
     }
 
-    const [agents, total] = await Promise.all([
-      AgentProfile.aggregate([
-        Object.keys(matchProfile).length ? { $match: matchProfile } : { $match: {} },
-        {
-          $lookup: {
-            from: "users",
-            localField: "user",
-            foreignField: "_id",
-            as: "user"
-          }
-        },
-        { $unwind: "$user" },
-        { $match: userMatch },
-        { $sort: sortStage },
-        { $skip: skip },
-        { $limit: limit }
-      ]),
-      AgentProfile.aggregate([
-        Object.keys(matchProfile).length ? { $match: matchProfile } : { $match: {} },
-        {
-          $lookup: {
-            from: "users",
-            localField: "user",
-            foreignField: "_id",
-            as: "user"
-          }
-        },
-        { $unwind: "$user" },
-        { $match: userMatch },
-        { $count: "total" }
-      ])
-    ]);
+    const runQuery = async (profileMatch: Record<string, any>, userQuery: Record<string, any>) => {
+      const [agents, total] = await Promise.all([
+        AgentProfile.aggregate([
+          Object.keys(profileMatch).length ? { $match: profileMatch } : { $match: {} },
+          {
+            $lookup: {
+              from: "users",
+              localField: "user",
+              foreignField: "_id",
+              as: "user"
+            }
+          },
+          { $unwind: "$user" },
+          { $match: userQuery },
+          {
+            $lookup: {
+              from: "products",
+              let: { userId: "$user._id" },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [{ $eq: ["$createdBy", "$$userId"] }, { $eq: ["$status", "ACTIVE"] }]
+                    }
+                  }
+                },
+                { $count: "count" }
+              ],
+              as: "productsCount"
+            }
+          },
+          {
+            $lookup: {
+              from: "services",
+              let: { userId: "$user._id" },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: { $eq: ["$createdBy", "$$userId"] }
+                  }
+                },
+                { $count: "count" }
+              ],
+              as: "servicesCount"
+            }
+          },
+          {
+            $addFields: {
+              productsCount: { $ifNull: [{ $arrayElemAt: ["$productsCount.count", 0] }, 0] },
+              servicesCount: { $ifNull: [{ $arrayElemAt: ["$servicesCount.count", 0] }, 0] }
+            }
+          },
+          {
+            $addFields: {
+              listingsCount: { $add: ["$productsCount", "$servicesCount"] }
+            }
+          },
+          ...(withListingsOnly ? [{ $match: { listingsCount: { $gt: 0 } } }] : []),
+          { $sort: sortStage },
+          { $skip: skip },
+          { $limit: limit }
+        ]),
+        AgentProfile.aggregate([
+          Object.keys(profileMatch).length ? { $match: profileMatch } : { $match: {} },
+          {
+            $lookup: {
+              from: "users",
+              localField: "user",
+              foreignField: "_id",
+              as: "user"
+            }
+          },
+          { $unwind: "$user" },
+          { $match: userQuery },
+          {
+            $lookup: {
+              from: "products",
+              let: { userId: "$user._id" },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [{ $eq: ["$createdBy", "$$userId"] }, { $eq: ["$status", "ACTIVE"] }]
+                    }
+                  }
+                },
+                { $count: "count" }
+              ],
+              as: "productsCount"
+            }
+          },
+          {
+            $lookup: {
+              from: "services",
+              let: { userId: "$user._id" },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: { $eq: ["$createdBy", "$$userId"] }
+                  }
+                },
+                { $count: "count" }
+              ],
+              as: "servicesCount"
+            }
+          },
+          {
+            $addFields: {
+              productsCount: { $ifNull: [{ $arrayElemAt: ["$productsCount.count", 0] }, 0] },
+              servicesCount: { $ifNull: [{ $arrayElemAt: ["$servicesCount.count", 0] }, 0] }
+            }
+          },
+          {
+            $addFields: {
+              listingsCount: { $add: ["$productsCount", "$servicesCount"] }
+            }
+          },
+          ...(withListingsOnly ? [{ $match: { listingsCount: { $gt: 0 } } }] : []),
+          { $count: "total" }
+        ])
+      ]);
 
-    return res.json({ agents, total: total[0]?.total || 0, page, limit });
+      return { agents, total: total[0]?.total || 0 };
+    };
+
+    const normalizeAgentAvatar = (items: any[]) =>
+      items.map((agent) => ({
+        ...agent,
+        user: agent?.user
+          ? {
+              ...agent.user,
+              avatarUrl: resolveAvatarUrl(agent.user.avatarUrl, agent.user._id || agent._id)
+            }
+          : agent.user
+      }));
+
+    let result = await runQuery(matchProfile, userMatch);
+    result = { ...result, agents: normalizeAgentAvatar(result.agents) };
+
+    if (verifiedOnly && result.total === 0) {
+      const fallbackUserMatch = { ...userMatch };
+      delete fallbackUserMatch["user.isVerified"];
+      result = await runQuery({}, fallbackUserMatch);
+      result = { ...result, agents: normalizeAgentAvatar(result.agents) };
+      return res.json({ ...result, page, limit, verifiedFallback: true });
+    }
+
+    return res.json({ ...result, page, limit });
   } catch (err) {
     console.error("listAgents error", err);
     return res.status(500).json({ message: "Server error" });
@@ -222,102 +336,96 @@ export const getAgentDetail = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     if (!isValidObjectId(id)) return res.status(400).json({ message: "Invalid agent id" });
+    const listingLimit = parsePositiveInt(req.query.listingLimit, 12, 40);
 
-    const user = await User.findById(id).lean();
+    let user = await User.findById(id).lean();
+    let profile: any = null;
+    if (user && user.role === "AGENT") {
+      profile = await AgentProfile.findOne({ user: user._id }).lean();
+    } else {
+      const profileById = await AgentProfile.findById(id).lean();
+      if (profileById) {
+        const userByProfile = await User.findById(profileById.user).lean();
+        if (userByProfile && userByProfile.role === "AGENT") {
+          user = userByProfile;
+          profile = profileById;
+        }
+      }
+    }
+
     if (!user || user.role !== "AGENT") {
       return res.status(404).json({ message: "Agent not found" });
     }
 
-    const profile = await AgentProfile.findOne({ user: user._id }).lean();
+    if (!profile) {
+      profile = await AgentProfile.findOne({ user: user._id }).lean();
+    }
     if (!profile) {
       return res.status(404).json({ message: "Agent profile not found" });
     }
 
     await AgentProfile.updateOne({ _id: profile._id }, { $inc: { profileViews: 1 } });
 
-    const [products, services, educationListings, constructionListings, taxiListings] = await Promise.all([
+    const [products, services] = await Promise.all([
       Product.find({ createdBy: user._id, status: "ACTIVE" })
-        .select("title price currency images category createdAt")
         .sort({ createdAt: -1 })
+        .limit(listingLimit)
         .lean(),
       Service.find({ createdBy: user._id })
-        .select("title kind category hourlyRate currency location createdAt")
         .sort({ createdAt: -1 })
-        .lean(),
-      EducationListing.find({ agentId: user._id, status: "active" })
-        .select("title category subcategory images format createdAt")
-        .sort({ createdAt: -1 })
-        .lean(),
-      ConstructionListing.find({ agentId: user._id, status: "active" })
-        .select("title category subcategory images priceFrom priceTo currency createdAt")
-        .sort({ createdAt: -1 })
-        .lean(),
-      TaxiListing.find({ agentId: user._id, status: "active" })
-        .select("title city images pricePerHour currency createdAt")
-        .sort({ createdAt: -1 })
+        .limit(listingLimit)
         .lean()
     ]);
 
-    const listingCards = [
-      ...products.map((item) => ({
-        type: "product",
-        id: item._id,
-        title: item.title,
-        image: item.images?.[0],
-        price: item.price,
-        currency: item.currency,
-        category: item.category,
+    const mapListing = (type: "product" | "service", item: any) => {
+      const coverImageUrl = resolveCoverImage(item);
+      const images = sanitizeImageArray(item.images);
+      return {
+        _id: item._id,
+        type,
+        title: item.title || item.name || "",
+        description: item.description || "",
+        category: item.category || null,
+        price: type === "product" ? Number(item.price || 0) : Number(item.hourlyRate || item.price || 0),
+        currency: item.currency || "USD",
+        coverImageUrl,
+        images: coverImageUrl ? [coverImageUrl, ...images.filter((img) => img !== coverImageUrl)].slice(0, 5) : images.slice(0, 5),
+        ratingAvg: Number(item.ratingAvg || 0),
+        ratingCount: Number(item.ratingCount || 0),
+        stats: {
+          likes: Number(item.likes || 0),
+          views: Number(item.views || 0),
+          orders: Number(item.orders || 0)
+        },
         createdAt: item.createdAt
-      })),
-      ...services.map((item) => ({
-        type: "service",
-        id: item._id,
-        title: item.title,
-        image: undefined,
-        price: item.hourlyRate,
-        currency: item.currency,
-        category: item.category,
-        createdAt: item.createdAt
-      })),
-      ...educationListings.map((item) => ({
-        type: "education",
-        id: item._id,
-        title: item.title,
-        image: item.images?.[0],
-        category: item.subcategory,
-        createdAt: item.createdAt
-      })),
-      ...constructionListings.map((item) => ({
-        type: "construction",
-        id: item._id,
-        title: item.title,
-        image: item.images?.[0],
-        price: item.priceFrom,
-        currency: item.currency,
-        category: item.subcategory,
-        createdAt: item.createdAt
-      })),
-      ...taxiListings.map((item) => ({
-        type: "taxi",
-        id: item._id,
-        title: item.title,
-        image: item.images?.[0],
-        price: item.pricePerHour,
-        currency: item.currency,
-        category: item.city,
-        createdAt: item.createdAt
-      }))
-    ].sort((a, b) => Number(new Date(b.createdAt)) - Number(new Date(a.createdAt)));
+      };
+    };
+
+    const productItems = products.map((item) => mapListing("product", item));
+    const serviceItems = services.map((item) => mapListing("service", item));
+    const listingsCount = productItems.length + serviceItems.length;
+    const listingsOrders = [...productItems, ...serviceItems].reduce((acc, item) => acc + Number(item.stats?.orders || 0), 0);
 
     return res.json({
-      agent: { user, profile },
+      _id: profile._id,
+      kind: profile.kind,
+      rating: profile.rating ?? 0,
+      ratingCount: profile.ratingCount ?? 0,
+      verifiedByAdmin: Boolean(profile.verifiedByAdmin),
+      serviceCategory: profile.serviceCategory ?? null,
+      listingsCount,
+      listingsOrders,
+      user: {
+        _id: user._id,
+        name: user.name,
+        username: user.username,
+        avatarUrl: resolveAvatarUrl(user.avatarUrl, user._id),
+        bio: user.bio ?? "",
+        region: user.region ?? ""
+      },
       listings: {
-        products,
-        services,
-        educationListings,
-        constructionListings,
-        taxiListings,
-        listingCards
+        products: productItems,
+        services: serviceItems
       }
     });
   } catch (err) {
@@ -344,7 +452,17 @@ export const listAgentReviews = async (req: Request, res: Response) => {
       AgentReview.countDocuments({ agentId: id })
     ]);
 
-    return res.json({ reviews, total, page, limit });
+    const normalizedReviews = reviews.map((review: any) => ({
+      ...review,
+      userId: review?.userId
+        ? {
+            ...review.userId,
+            avatarUrl: resolveAvatarUrl(review.userId.avatarUrl, review.userId._id)
+          }
+        : review.userId
+    }));
+
+    return res.json({ reviews: normalizedReviews, total, page, limit });
   } catch (err) {
     console.error("listAgentReviews error", err);
     return res.status(500).json({ message: "Server error" });
@@ -406,6 +524,7 @@ export const upsertAgentReview = async (req: Request, res: Response) => {
 export const topVerifiedAgents = async (req: Request, res: Response) => {
   try {
     const limit = Math.min(Number(req.query.limit) || 10, 50);
+    const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const agents = await AgentProfile.aggregate([
       { $match: { verifiedByAdmin: true } },
       {
@@ -417,7 +536,87 @@ export const topVerifiedAgents = async (req: Request, res: Response) => {
         }
       },
       { $unwind: "$user" },
-      { $sort: { rating: -1, createdAt: -1 } },
+      {
+        $lookup: {
+          from: "products",
+          let: { userId: "$user._id" },
+          pipeline: [
+            { $match: { $expr: { $and: [{ $eq: ["$createdBy", "$$userId"] }, { $eq: ["$status", "ACTIVE"] }] } } },
+            {
+              $group: {
+                _id: null,
+                count: { $sum: 1 },
+                weeklyCount: {
+                  $sum: {
+                    $cond: [{ $gte: ["$createdAt", weekStart] }, 1, 0]
+                  }
+                },
+                orders: { $sum: { $ifNull: ["$orders", 0] } },
+                views: { $sum: { $ifNull: ["$views", 0] } }
+              }
+            }
+          ],
+          as: "productStats"
+        }
+      },
+      {
+        $lookup: {
+          from: "services",
+          let: { userId: "$user._id" },
+          pipeline: [
+            { $match: { $expr: { $eq: ["$createdBy", "$$userId"] } } },
+            {
+              $group: {
+                _id: null,
+                count: { $sum: 1 },
+                weeklyCount: {
+                  $sum: {
+                    $cond: [{ $gte: ["$createdAt", weekStart] }, 1, 0]
+                  }
+                },
+                orders: { $sum: { $ifNull: ["$orders", 0] } },
+                views: { $sum: { $ifNull: ["$views", 0] } }
+              }
+            }
+          ],
+          as: "serviceStats"
+        }
+      },
+      {
+        $addFields: {
+          productStats: { $ifNull: [{ $arrayElemAt: ["$productStats", 0] }, {}] },
+          serviceStats: { $ifNull: [{ $arrayElemAt: ["$serviceStats", 0] }, {}] }
+        }
+      },
+      {
+        $addFields: {
+          listingsCount: {
+            $add: [{ $ifNull: ["$productStats.count", 0] }, { $ifNull: ["$serviceStats.count", 0] }]
+          },
+          weeklyListingsCount: {
+            $add: [{ $ifNull: ["$productStats.weeklyCount", 0] }, { $ifNull: ["$serviceStats.weeklyCount", 0] }]
+          },
+          listingsOrders: {
+            $add: [{ $ifNull: ["$productStats.orders", 0] }, { $ifNull: ["$serviceStats.orders", 0] }]
+          },
+          listingsViews: {
+            $add: [{ $ifNull: ["$productStats.views", 0] }, { $ifNull: ["$serviceStats.views", 0] }]
+          }
+        }
+      },
+      {
+        $addFields: {
+          weeklyScore: {
+            $add: [
+              { $multiply: [{ $ifNull: ["$weeklyListingsCount", 0] }, 3] },
+              { $multiply: [{ $ifNull: ["$listingsOrders", 0] }, 2] },
+              { $multiply: [{ $ifNull: ["$listingsViews", 0] }, 0.05] },
+              { $multiply: [{ $ifNull: ["$rating", 0] }, 5] }
+            ]
+          }
+        }
+      },
+      { $sort: { weeklyScore: -1, rating: -1, createdAt: -1 } },
       { $limit: limit },
       {
         $project: {
@@ -427,6 +626,11 @@ export const topVerifiedAgents = async (req: Request, res: Response) => {
           faceIdVerified: 1,
           kind: 1,
           serviceCategory: 1,
+          listingsCount: 1,
+          weeklyListingsCount: 1,
+          listingsOrders: 1,
+          listingsViews: 1,
+          weeklyScore: 1,
           createdAt: 1,
           updatedAt: 1,
           "user._id": 1,
@@ -439,7 +643,17 @@ export const topVerifiedAgents = async (req: Request, res: Response) => {
       }
     ]);
 
-    return res.json({ agents, limit });
+    const normalizedAgents = agents.map((agent) => ({
+      ...agent,
+      user: agent?.user
+        ? {
+            ...agent.user,
+            avatarUrl: resolveAvatarUrl(agent.user.avatarUrl, agent.user._id || agent._id)
+          }
+        : agent.user
+    }));
+
+    return res.json({ agents: normalizedAgents, limit });
   } catch (err) {
     console.error("topVerifiedAgents error", err);
     return res.status(500).json({ message: "Server error" });

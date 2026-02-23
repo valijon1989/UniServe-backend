@@ -913,7 +913,9 @@ export class ServicesService {
           });
         } else {
           let updateNeeded = false;
-          if (user.avatarUrl !== avatarUrl) {
+          const shouldUpdateAvatar =
+            !user.avatarUrl || /(?:images\.)?unsplash\.com/.test(user.avatarUrl);
+          if (shouldUpdateAvatar && user.avatarUrl !== avatarUrl) {
             user.avatarUrl = avatarUrl;
             updateNeeded = true;
           }

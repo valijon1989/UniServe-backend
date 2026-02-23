@@ -3,6 +3,7 @@ import mongoose, { Schema, Document } from "mongoose";
 export type ServiceKind = "SOCIAL" | "MATERIAL";
 
 export interface IService extends Document {
+  slug?: string;
   title: string;
   description: string;
   kind: ServiceKind;
@@ -10,6 +11,15 @@ export interface IService extends Document {
   hourlyRate?: number;
   currency: string;
   location?: string;
+  images: string[];
+  image?: string;
+  imageUrl?: string;
+  coverImage?: string;
+  coverImageUrl?: string;
+  banner?: string;
+  cardImageUrl?: string;
+  ratingAvg?: number;
+  ratingCount?: number;
   likes?: number;
   views?: number;
   orders?: number;
@@ -21,12 +31,22 @@ export interface IService extends Document {
 const ServiceSchema = new Schema<IService>(
   {
     title: { type: String, required: true },
+    slug: { type: String, trim: true, lowercase: true, index: true },
     description: { type: String },
     kind: { type: String, enum: ["SOCIAL", "MATERIAL"], required: true },
     category: { type: String, required: true },
     hourlyRate: { type: Number },
     currency: { type: String, default: "USD" },
     location: { type: String },
+    images: { type: [String], default: [] },
+    image: { type: String },
+    imageUrl: { type: String },
+    coverImage: { type: String },
+    coverImageUrl: { type: String },
+    banner: { type: String },
+    cardImageUrl: { type: String },
+    ratingAvg: { type: Number, default: 0 },
+    ratingCount: { type: Number, default: 0 },
     likes: { type: Number, default: 0 },
     views: { type: Number, default: 0 },
     orders: { type: Number, default: 0 },
@@ -34,5 +54,7 @@ const ServiceSchema = new Schema<IService>(
   },
   { timestamps: true }
 );
+
+ServiceSchema.index({ slug: 1 }, { unique: true, sparse: true });
 
 export const Service = mongoose.model<IService>("Service", ServiceSchema);

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" role="img" aria-label="Sony A7 IV Body">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="hsl(353 70% 52%)"/>
+      <stop offset="55%" stop-color="hsl(-168 68% 34%)"/>
+      <stop offset="100%" stop-color="hsl(-281 72% 20%)"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="800" fill="url(#bg)"/>
+  <rect x="48" y="48" width="1104" height="704" rx="26" fill="rgba(0,0,0,0.18)" stroke="rgba(255,255,255,0.28)"/>
+  <text x="90" y="154" fill="#ffffff" font-family="Arial, sans-serif" font-size="44" font-weight="700">Sony A7 IV Body</text>
+  <text x="90" y="212" fill="rgba(255,255,255,0.92)" font-family="Arial, sans-serif" font-size="28" font-weight="500">Topic: Camera | Sony A7 IV Body</text>
+  <text x="90" y="260" fill="rgba(255,255,255,0.82)" font-family="Arial, sans-serif" font-size="22">Category image generated for this listing only</text>
+  <text x="90" y="706" fill="rgba(255,255,255,0.88)" font-family="Arial, sans-serif" font-size="24" font-weight="700">PRODUCTS</text>
+  <circle cx="1008" cy="208" r="122" fill="rgba(255,255,255,0.16)"/>
+  <circle cx="936" cy="552" r="176" fill="rgba(255,255,255,0.10)"/>
+</svg>

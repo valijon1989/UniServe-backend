@@ -29,7 +29,7 @@ router.get("/trending", getTrendingProducts);
 router.get("/me", authRequired, roleRequired(["AGENT", "ADMIN"]), myProducts);
 router.patch("/:id/status", authRequired, roleRequired(["AGENT", "ADMIN"]), updateProductStatus);
 router.get("/", listProducts);
-router.get("/:id", productDetail);
+router.get("/:identifier", productDetail);
 router.post("/:id/:action(view|like|purchase)", authOptional, productStat);
 
 export default router;

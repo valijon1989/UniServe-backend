@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { authRequired } from "../middlewares/auth";
+import { createMediaRoom, createMediaToken, getGeneratedAvatar } from "../controllers/mediaController";
 
 type CacheEntry = {
   expiresAt: number;
@@ -27,6 +28,8 @@ const rateBucket = new Map<string, RateEntry>();
 const cacheTtlMs = Number(process.env.PEXELS_CACHE_TTL_MS || 60 * 60 * 1000);
 const rateWindowMs = Number(process.env.PEXELS_RATE_WINDOW_MS || 15 * 60 * 1000);
 const rateMax = Number(process.env.PEXELS_RATE_MAX || 60);
+
+router.get("/avatar/:seed.svg", getGeneratedAvatar);
 
 router.get("/:category", authRequired, async (req, res) => {
   try {
@@ -80,5 +83,8 @@ router.get("/:category", authRequired, async (req, res) => {
     return res.status(500).json({ error: "Pexels API error" });
   }
 });
+
+router.post("/rooms", authRequired, createMediaRoom);
+router.post("/token", authRequired, createMediaToken);
 
 export default router;

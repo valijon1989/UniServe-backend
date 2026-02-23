@@ -5,7 +5,18 @@
   "main": "dist/server.js",
   "scripts": {
     "start": "ts-node src/server.ts",
-    "dev": "nodemon --exec ts-node src/server.ts"
+    "dev": "nodemon --exec ts-node src/server.ts",
+    "backfill:cover-image-url": "ts-node scripts/backfillCoverImageUrl.ts",
+    "fix:duplicate-slugs": "ts-node scripts/fixDuplicateSlugs.ts",
+    "migrate:news-posts": "ts-node scripts/migrateNewsPostsToPosts.ts",
+    "cleanup:duplicate-listings": "ts-node scripts/removeDuplicateListings.ts",
+    "backfill:cover-images": "ts-node scripts/backfillCoverImages.ts",
+    "fix:listings-images": "ts-node scripts/fixListingImages.ts",
+    "fix:listings-topic-images": "ts-node scripts/fixListingTopicImages.ts",
+    "fill:listings-images": "ts-node scripts/fillMissingListingImages.ts",
+    "fix:agent-avatars": "ts-node scripts/fixAgentAvatarUrls.ts",
+    "check:agents-integrity": "ts-node scripts/checkAgentsIntegrity.ts",
+    "fix:agents-integrity": "ts-node scripts/checkAgentsIntegrity.ts --fix"
   },
   "dependencies": {
     "@types/cookie-parser": "^1.4.10",

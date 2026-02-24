@@ -6,6 +6,20 @@ import { User } from "../models/User";
 import { ensureAbsoluteUrl } from "../utils/imageHelpers";
 import { isLocalImageUrl, localImageExists, resolveCoverImage, sanitizeImageArray } from "../utils/resolveCoverImage";
 import { resolveAvatarUrl } from "../utils/avatarImage";
+import { toDetailDto } from "./productController";
+import { attachServiceCover } from "./serviceController";
+import {
+  buildListingStats,
+  DealSaleMeta,
+  ListingStats,
+  resolveDealSaleMeta,
+  resolveSaleMeta,
+  selectNewestListings,
+  selectSaleListings,
+  selectTopRatedListings,
+  selectWeeklyTopListings,
+  toTypeIdKey
+} from "../services/listingSelector";
 
 type ListingKind = "product" | "service";
 type HomeListing = {
@@ -15,13 +29,51 @@ type HomeListing = {
   title: string;
   description: string;
   price: number | null;
+  originalPrice: number | null;
+  salePrice: number | null;
+  discountPercent: number | null;
+  isSale: boolean;
   category: string | null;
   ratingAvg: number;
   ratingCount: number;
-  stats: { likes: number; views: number; orders: number };
+  stats: ListingStats;
   createdAt: Date;
+  updatedAt?: Date;
   coverImageUrl: string | null;
   images: string[];
+};
+
+type DealListing = {
+  _id: string;
+  id: string;
+  type: ListingKind;
+  kind: ListingKind;
+  title: string;
+  name: string;
+  price: number | null;
+  salePrice: number | null;
+  discountPercent: number;
+  isOnSale: boolean;
+  isSale: boolean;
+  stats: {
+    likes: number;
+    views: number;
+    orders: number;
+    purchases: number;
+  };
+  likes: number;
+  views: number;
+  orders: number;
+  createdAt: Date | string | null;
+  updatedAt: Date | string | null;
+  coverImageUrl: string | null;
+  coverImage: string | null;
+  imageUrl: string | null;
+  image: string | null;
+  thumbnail: string | null;
+  cardImageUrl: string | null;
+  images: string[];
+  [key: string]: unknown;
 };
 
 const buildListing = (kind: ListingKind, item: any, agentProfileMap: Record<string, { profile?: any; user?: any }>) => {
@@ -103,11 +155,11 @@ const fetchListings = async () => {
     Product.find({ status: "ACTIVE" })
       .sort({ updatedAt: -1 })
       .limit(100)
-      .populate("createdBy", "name avatarUrl"),
+      .populate("createdBy", "name username role avatarUrl"),
     Service.find({})
       .sort({ updatedAt: -1 })
       .limit(100)
-      .populate("createdBy", "name avatarUrl")
+      .populate("createdBy", "name username role avatarUrl")
   ]);
   return { products, services };
 };
@@ -189,21 +241,29 @@ const pickPrice = (kind: ListingKind, doc: any): number | null => {
 
 const toHomeListing = (kind: ListingKind, doc: any, ratingCount: number): HomeListing => {
   const media = resolveHomeMedia(kind, doc);
-  const likes = parseNumber(doc.likes);
-  const views = parseNumber(doc.views);
-  const orders = parseNumber(doc.orders);
+  const saleMeta = resolveSaleMeta({
+    basePrice: pickPrice(kind, doc),
+    salePrice: doc?.salePrice,
+    discountPercent: doc?.discountPercent,
+    oldPrice: doc?.oldPrice
+  });
   return {
     _id: String(doc._id),
     type: kind,
     slug: typeof doc.slug === "string" ? doc.slug : null,
     title: String(doc.title || doc.name || ""),
     description: String(doc.description || ""),
-    price: pickPrice(kind, doc),
+    price: saleMeta.price,
+    originalPrice: saleMeta.originalPrice,
+    salePrice: saleMeta.salePrice,
+    discountPercent: saleMeta.discountPercent,
+    isSale: saleMeta.isSale,
     category: typeof doc.category === "string" ? doc.category : null,
     ratingAvg: parseNumber(doc.ratingAvg ?? doc.rating?.avg),
     ratingCount: parseNumber(ratingCount),
-    stats: { likes, views, orders },
+    stats: buildListingStats(doc),
     createdAt: new Date(doc.createdAt),
+    updatedAt: new Date(doc.updatedAt || doc.createdAt),
     coverImageUrl: media.coverImageUrl,
     images: media.images
   };
@@ -239,12 +299,19 @@ const fetchHomeListingsByType = async (
         description: 1,
         price: 1,
         hourlyRate: 1,
+        oldPrice: 1,
+        salePrice: 1,
+        discountPercent: 1,
         ratingAvg: "$__ratingAvg",
         ratingCount: "$__ratingCount",
         likes: { $ifNull: ["$likes", 0] },
         orders: { $ifNull: ["$orders", 0] },
         views: { $ifNull: ["$views", 0] },
+        likes_7d: { $ifNull: ["$likes_7d", { $ifNull: ["$likes7d", 0] }] },
+        views_7d: { $ifNull: ["$views_7d", { $ifNull: ["$views7d", 0] }] },
+        orders_7d: { $ifNull: ["$orders_7d", { $ifNull: ["$orders7d", 0] }] },
         createdAt: 1,
+        updatedAt: 1,
         imageUrl: 1,
         image: 1,
         thumbnail: 1,
@@ -260,16 +327,77 @@ const fetchHomeListingsByType = async (
   return docs.map((doc) => toHomeListing(kind, doc, parseNumber(doc.ratingCount)));
 };
 
-const dedupeByTypeId = (items: HomeListing[]): HomeListing[] => {
-  const seen = new Set<string>();
-  const out: HomeListing[] = [];
-  for (const item of items) {
-    const key = `${item.type}:${item._id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(item);
-  }
-  return out;
+const fetchSaleListingsByType = async (kind: ListingKind, perTypeLimit: number): Promise<HomeListing[]> => {
+  const Model = kind === "product" ? Product : Service;
+  const match = kind === "product" ? { status: "ACTIVE" } : {};
+  const basePriceExpr = kind === "product" ? { $ifNull: ["$price", 0] } : { $ifNull: ["$price", { $ifNull: ["$hourlyRate", 0] }] };
+
+  const docs = await Model.aggregate([
+    { $match: match },
+    {
+      $addFields: {
+        __ratingAvg: { $ifNull: ["$ratingAvg", { $ifNull: ["$rating.avg", 0] }] },
+        __ratingCount: { $ifNull: ["$ratingCount", { $ifNull: ["$rating.count", 0] }] },
+        __basePrice: basePriceExpr,
+        __salePrice: { $ifNull: ["$salePrice", 0] },
+        __discountPercent: { $ifNull: ["$discountPercent", 0] }
+      }
+    },
+    {
+      $addFields: {
+        __effectiveDiscount: {
+          $cond: [
+            { $and: [{ $gt: ["$__salePrice", 0] }, { $gt: ["$__basePrice", 0] }, { $lt: ["$__salePrice", "$__basePrice"] }] },
+            { $multiply: [{ $divide: [{ $subtract: ["$__basePrice", "$__salePrice"] }, "$__basePrice"] }, 100] },
+            {
+              $cond: [
+                { $and: [{ $gt: ["$__discountPercent", 0] }, { $lt: ["$__discountPercent", 100] }] },
+                "$__discountPercent",
+                0
+              ]
+            }
+          ]
+        }
+      }
+    },
+    { $match: { $expr: { $gt: ["$__effectiveDiscount", 0] } } },
+    { $sort: { __effectiveDiscount: -1, updatedAt: -1, createdAt: -1 } },
+    { $limit: perTypeLimit },
+    {
+      $project: {
+        slug: 1,
+        title: 1,
+        category: 1,
+        description: 1,
+        price: 1,
+        hourlyRate: 1,
+        oldPrice: 1,
+        salePrice: 1,
+        discountPercent: 1,
+        ratingAvg: "$__ratingAvg",
+        ratingCount: "$__ratingCount",
+        likes: { $ifNull: ["$likes", 0] },
+        orders: { $ifNull: ["$orders", 0] },
+        views: { $ifNull: ["$views", 0] },
+        likes_7d: { $ifNull: ["$likes_7d", { $ifNull: ["$likes7d", 0] }] },
+        views_7d: { $ifNull: ["$views_7d", { $ifNull: ["$views7d", 0] }] },
+        orders_7d: { $ifNull: ["$orders_7d", { $ifNull: ["$orders7d", 0] }] },
+        createdAt: 1,
+        updatedAt: 1,
+        imageUrl: 1,
+        image: 1,
+        thumbnail: 1,
+        cardImageUrl: 1,
+        coverImage: 1,
+        coverImageUrl: 1,
+        banner: 1,
+        images: 1,
+        media: 1
+      }
+    }
+  ]);
+
+  return docs.map((doc) => toHomeListing(kind, doc, parseNumber(doc.ratingCount)));
 };
 
 const dedupeListingCards = (items: any[]) => {
@@ -294,192 +422,102 @@ const dedupeListingCards = (items: any[]) => {
   return out;
 };
 
-const dedupeByLogicalKey = (items: HomeListing[]): HomeListing[] => {
-  const seen = new Set<string>();
-  const out: HomeListing[] = [];
-  for (const item of items) {
-    const logicalKey =
-      item.slug && item.slug.trim()
-        ? `${item.type}:slug:${item.slug.trim().toLowerCase()}`
-        : `${item.type}:title:${item.title.trim().toLowerCase()}|cat:${(item.category || "").trim().toLowerCase()}|price:${String(
-            item.price ?? ""
-          )}`;
-    if (seen.has(logicalKey)) continue;
-    seen.add(logicalKey);
-    out.push(item);
-  }
-  return out;
-};
-
-const reduceCoverRepeats = (items: HomeListing[]): HomeListing[] => {
-  const usedCovers = new Set<string>();
-  return items.map((item) => {
-    const candidates = [item.coverImageUrl, ...item.images].filter(Boolean) as string[];
-    let chosen = candidates.find((url) => !usedCovers.has(url)) || item.coverImageUrl;
-    if (!chosen) {
-      chosen = item.type === "product" ? PRODUCT_FALLBACK : SERVICE_FALLBACK;
-    }
-    usedCovers.add(chosen);
-    const images = [chosen, ...item.images.filter((img) => img !== chosen)].slice(0, 5);
-    return {
-      ...item,
-      coverImageUrl: chosen,
-      images
-    };
-  });
-};
-
-const toPublicHomeListing = (item: HomeListing) => ({
+const toHomeFallbackDto = (item: HomeListing) => ({
   _id: item._id,
+  id: item._id,
   type: item.type,
+  kind: item.type,
+  slug: item.slug || null,
   title: item.title,
+  name: item.title,
   description: item.description,
   price: item.price,
+  salePrice: item.salePrice ?? item.price,
+  originalPrice: item.originalPrice,
+  oldPrice: item.originalPrice,
+  discountPercent: item.discountPercent ?? 0,
+  isOnSale: item.isSale,
+  isSale: item.isSale,
   category: item.category,
   ratingAvg: item.ratingAvg,
   ratingCount: item.ratingCount,
-  stats: item.stats,
+  stats: {
+    likes: item.stats.likes,
+    views: item.stats.views,
+    orders: item.stats.orders,
+    purchases: item.stats.orders
+  },
+  likes: item.stats.likes,
+  views: item.stats.views,
+  orders: item.stats.orders,
   createdAt: item.createdAt,
+  updatedAt: item.updatedAt || item.createdAt,
   coverImageUrl: item.coverImageUrl,
+  coverImage: item.coverImageUrl,
+  imageUrl: item.coverImageUrl,
+  image: item.coverImageUrl,
+  thumbnail: item.coverImageUrl,
+  cardImageUrl: item.coverImageUrl,
   images: item.images
 });
 
-const resolvePublicOrigin = (req: Request): string => {
-  const envOrigin =
-    process.env.PUBLIC_ORIGIN ||
-    process.env.API_BASE_URL ||
-    process.env.BACKEND_ORIGIN ||
-    process.env.SERVER_ORIGIN ||
-    process.env.SERVER_URL;
-  if (envOrigin && /^https?:\/\//i.test(envOrigin)) {
-    return envOrigin.replace(/\/+$/, "");
-  }
-  const protocol = (req.headers["x-forwarded-proto"] as string) || req.protocol || "http";
-  const host = req.get("host") || "localhost:5001";
-  return `${protocol}://${host}`.replace(/\/+$/, "");
-};
+const serializeHomeItems = async (items: HomeListing[]) => {
+  if (!items.length) return [];
 
-const toAbsoluteUrl = (origin: string, value: string | null | undefined): string | null => {
-  if (!value) return null;
-  if (/^https?:\/\//i.test(value)) return value;
-  if (value.startsWith("/")) return `${origin}${value}`;
-  return `${origin}/${value.replace(/^\/+/, "")}`;
-};
+  const productIds = items.filter((item) => item.type === "product").map((item) => item._id);
+  const serviceIds = items.filter((item) => item.type === "service").map((item) => item._id);
 
-const normalizeHomeResponseUrls = (origin: string, item: ReturnType<typeof toPublicHomeListing>) => {
-  const fallback =
-    item.type === "product" ? `${origin}/images/fallback-product.png` : `${origin}/images/fallback-service.png`;
-  const coverImageUrl = toAbsoluteUrl(origin, item.coverImageUrl) || fallback;
-  const images = (item.images || [])
-    .map((img) => toAbsoluteUrl(origin, img))
-    .filter(Boolean) as string[];
+  const [productDocs, serviceDocs] = await Promise.all([
+    productIds.length
+      ? Product.find({ _id: { $in: productIds } }).populate("createdBy", "name username role avatarUrl").lean()
+      : Promise.resolve([] as any[]),
+    serviceIds.length
+      ? Service.find({ _id: { $in: serviceIds } }).populate("createdBy", "name username role avatarUrl").lean()
+      : Promise.resolve([] as any[])
+  ]);
 
-  const normalizedImages = [coverImageUrl, ...images.filter((img) => img !== coverImageUrl)].slice(0, 5);
-  return {
-    ...item,
-    coverImageUrl,
-    images: normalizedImages
-  };
-};
+  const productMap = new Map(productDocs.map((doc) => [String(doc._id), toDetailDto(doc)]));
+  const serviceMap = new Map(serviceDocs.map((doc) => [String(doc._id), attachServiceCover(doc)]));
 
-const daysSinceCreated = (createdAt: Date): number => {
-  const diffMs = Date.now() - new Date(createdAt).getTime();
-  return Math.max(0, diffMs / (1000 * 60 * 60 * 24));
-};
-
-const computeTopScore = (item: HomeListing): number => {
-  const recencyBoost = Math.max(0, 10 - daysSinceCreated(item.createdAt));
-  return (
-    item.ratingAvg * 5 +
-    item.ratingCount * 2 +
-    item.stats.orders * 3 +
-    item.stats.views * 0.05 +
-    recencyBoost
-  );
+  return items.map((item) => {
+    if (item.type === "product") {
+      return productMap.get(item._id) || toHomeFallbackDto(item);
+    }
+    return serviceMap.get(item._id) || toHomeFallbackDto(item);
+  });
 };
 
 export const getHomeListings = async (req: Request, res: Response) => {
   try {
-    const publicOrigin = resolvePublicOrigin(req);
     const limit = Math.min(Math.max(parseInt(String(req.query.limit || "8"), 10) || 8, 1), 12);
+    const perTypeLimit = limit * 3;
 
-    const [topProducts, topServices, newProducts, newServices, discountedProducts] = await Promise.all([
-      fetchHomeListingsByType("product", "topRated", limit),
-      fetchHomeListingsByType("service", "topRated", limit),
-      fetchHomeListingsByType("product", "newest", limit),
-      fetchHomeListingsByType("service", "newest", limit),
-      Product.aggregate([
-        { $match: { status: "ACTIVE", oldPrice: { $exists: true, $gt: 0 } } },
-        { $addFields: { __oldPrice: { $ifNull: ["$oldPrice", 0] } } },
-        { $match: { $expr: { $gt: ["$__oldPrice", "$price"] } } },
-        { $sort: { createdAt: -1 } },
-        { $limit: limit * 3 }
-      ]).then((docs) => docs.map((doc) => toHomeListing("product", doc, parseNumber(doc.ratingCount))))
+    const [topProducts, topServices, newProducts, newServices, saleProducts, saleServices] = await Promise.all([
+      fetchHomeListingsByType("product", "topRated", perTypeLimit),
+      fetchHomeListingsByType("service", "topRated", perTypeLimit),
+      fetchHomeListingsByType("product", "newest", perTypeLimit),
+      fetchHomeListingsByType("service", "newest", perTypeLimit),
+      fetchSaleListingsByType("product", perTypeLimit),
+      fetchSaleListingsByType("service", perTypeLimit)
     ]);
 
     const topRatedMerged = [...topProducts, ...topServices];
-    const topRatedUnique = reduceCoverRepeats(dedupeByTypeId(dedupeByLogicalKey([...topRatedMerged])));
-    const allNoRatings = topRatedUnique.every((item) => item.ratingCount === 0);
-
-    const topRatedRaw = [...topRatedUnique]
-      .sort((a, b) => {
-        if (allNoRatings) {
-          if (b.stats.views !== a.stats.views) return b.stats.views - a.stats.views;
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-        }
-        const bScore = computeTopScore(b);
-        const aScore = computeTopScore(a);
-        if (bScore !== aScore) return bScore - aScore;
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      })
-      .slice(0, limit);
-
-    const topRated = topRatedRaw
-      .map(toPublicHomeListing)
-      .map((item) => normalizeHomeResponseUrls(publicOrigin, item));
-
-    const topRatedKeys = new Set(topRatedRaw.map((item) => `${item.type}:${item._id}`));
     const newestMerged = [...newProducts, ...newServices];
-    const newestRaw = reduceCoverRepeats(
-      dedupeByTypeId(
-        dedupeByLogicalKey([...newestMerged].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()))
-      ).filter((item) => !topRatedKeys.has(`${item.type}:${item._id}`))
-    ).slice(0, limit);
+    const saleMerged = [...saleProducts, ...saleServices];
 
-    const newest = newestRaw
-      .map(toPublicHomeListing)
-      .map((item) => normalizeHomeResponseUrls(publicOrigin, item));
+    const topRatedRaw = selectTopRatedListings(topRatedMerged, limit);
+    const topRated = await serializeHomeItems(topRatedRaw);
 
-    const latestFallbackRaw = reduceCoverRepeats(
-      dedupeByTypeId(
-        dedupeByLogicalKey([...newestMerged, ...topRatedMerged].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()))
-      )
-    ).slice(0, limit);
+    const topRatedKeys = new Set(topRatedRaw.map((item) => toTypeIdKey(item)));
+    const newestRaw = selectNewestListings(newestMerged, limit, topRatedKeys);
+    const newest = await serializeHomeItems(newestRaw);
 
-    const discountedRawBase = reduceCoverRepeats(dedupeByTypeId(dedupeByLogicalKey(discountedProducts))).slice(0, limit);
-    const discountedRaw = discountedRawBase.length ? discountedRawBase : latestFallbackRaw;
-    const discounted = discountedRaw
-      .map(toPublicHomeListing)
-      .map((item) => normalizeHomeResponseUrls(publicOrigin, item));
+    const latestFallbackRaw = selectNewestListings([...newestMerged, ...topRatedMerged], limit);
+    const discountedRaw = selectSaleListings(saleMerged, latestFallbackRaw, limit);
+    const discounted = await serializeHomeItems(discountedRaw);
 
-    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
-    const weeklyTopBase = reduceCoverRepeats(
-      dedupeByTypeId(dedupeByLogicalKey([...topRatedMerged, ...newestMerged]))
-    )
-      .map((item) => {
-        const ageMs = Date.now() - new Date(item.createdAt).getTime();
-        const recencyBonus = ageMs <= sevenDaysMs ? 20 : 0;
-        const score = item.stats.orders * 4 + item.stats.views * 0.08 + item.stats.likes * 1.5 + item.ratingAvg * 2 + recencyBonus;
-        return { item, score };
-      })
-      .sort((a, b) => b.score - a.score)
-      .map((entry) => entry.item)
-      .slice(0, limit);
-
-    const weeklyTopRaw = weeklyTopBase.length ? weeklyTopBase : latestFallbackRaw;
-    const weeklyTop = weeklyTopRaw
-      .map(toPublicHomeListing)
-      .map((item) => normalizeHomeResponseUrls(publicOrigin, item));
+    const weeklyTopRaw = selectWeeklyTopListings([...topRatedMerged, ...newestMerged], latestFallbackRaw, limit);
+    const weeklyTop = await serializeHomeItems(weeklyTopRaw);
 
     return res.json({
       topRated,
@@ -495,24 +533,233 @@ export const getHomeListings = async (req: Request, res: Response) => {
 
 export const getHomeFeatured = getHomeListings;
 
+const resolveDealKind = (item: any): ListingKind => {
+  const type = String(item?.type || "").trim().toLowerCase();
+  if (type === "service") return "service";
+  if (type === "product") return "product";
+  const kind = String(item?.kind || "").trim().toLowerCase();
+  return kind === "service" ? "service" : "product";
+};
+
+const toDealId = (item: { _id?: unknown; id?: unknown }): string => String(item?._id || item?.id || "");
+const toDealTypeIdKey = (item: Pick<DealListing, "_id" | "type">): string => `${item.type}:${item._id}`;
+
+const normalizeDealSale = (item: {
+  price?: unknown;
+  salePrice?: unknown;
+  discountPercent?: unknown;
+}): DealSaleMeta =>
+  resolveDealSaleMeta({
+    price: item.price,
+    salePrice: item.salePrice,
+    discountPercent: item.discountPercent
+  });
+
+const normalizeDealDto = (item: any): DealListing => {
+  const type = resolveDealKind(item);
+  const id = toDealId(item);
+  const title = String(item?.title || item?.name || "");
+  const name = String(item?.name || title);
+
+  const rawPrice = parseNumber(item?.price ?? item?.hourlyRate);
+  const price = rawPrice > 0 ? rawPrice : null;
+  const saleMeta = normalizeDealSale({
+    price,
+    salePrice: item?.salePrice,
+    discountPercent: item?.discountPercent
+  });
+
+  const likes = parseNumber(item?.stats?.likes ?? item?.likes);
+  const views = parseNumber(item?.stats?.views ?? item?.views);
+  const orders = parseNumber(item?.stats?.orders ?? item?.stats?.purchases ?? item?.orders ?? item?.purchases);
+
+  const rawImages = sanitizeImageArray(item?.images);
+  const fallbackCover = type === "product" ? PRODUCT_FALLBACK : SERVICE_FALLBACK;
+  const resolvedCover = ensureReachable(resolveCoverImage({ ...item, images: rawImages })) || fallbackCover;
+  const images = uniqueUrls([resolvedCover, ...rawImages].filter(Boolean) as string[]).slice(0, 5);
+  const coverImageUrl = images[0] || resolvedCover || null;
+
+  return {
+    ...item,
+    _id: id,
+    id,
+    type,
+    kind: type,
+    title,
+    name,
+    price: saleMeta.price,
+    salePrice: saleMeta.salePrice,
+    discountPercent: saleMeta.discountPercent,
+    isOnSale: saleMeta.isOnSale,
+    isSale: saleMeta.isOnSale,
+    stats: {
+      likes,
+      views,
+      orders,
+      purchases: orders
+    },
+    likes,
+    views,
+    orders,
+    createdAt: item?.createdAt || null,
+    updatedAt: item?.updatedAt || item?.createdAt || null,
+    coverImageUrl,
+    coverImage: coverImageUrl,
+    imageUrl: coverImageUrl,
+    image: coverImageUrl,
+    thumbnail: coverImageUrl,
+    cardImageUrl: coverImageUrl,
+    images
+  };
+};
+
+const dedupeDeals = (items: DealListing[]): DealListing[] => {
+  const seen = new Set<string>();
+  const out: DealListing[] = [];
+  for (const item of items) {
+    const key = toDealTypeIdKey(item);
+    if (!item._id || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+};
+
+const isSaleListingDto = (item: DealListing): boolean => normalizeDealSale(item).isOnSale;
+
+const toDealSortTime = (item: any): number => {
+  const stamp = item?.updatedAt || item?.createdAt || 0;
+  const date = new Date(stamp);
+  const ts = date.getTime();
+  return Number.isFinite(ts) ? ts : 0;
+};
+
+const sortDealItems = (a: any, b: any): number => {
+  const discountDiff = parseNumber(b?.discountPercent) - parseNumber(a?.discountPercent);
+  if (discountDiff !== 0) return discountDiff;
+  return toDealSortTime(b) - toDealSortTime(a);
+};
+
+const selectDealsByType = (items: DealListing[], type: ListingKind, limit: number, onlySale: boolean): DealListing[] => {
+  const typed = dedupeDeals(items.filter((item) => item.type === type));
+  if (!typed.length) return [];
+
+  const sorted = onlySale ? typed.filter((item) => isSaleListingDto(item)).sort(sortDealItems) : typed.sort((a, b) => toDealSortTime(b) - toDealSortTime(a));
+  return sorted.slice(0, limit);
+};
+
+const toFallbackDeal = (item: DealListing): DealListing => ({
+  ...item,
+  salePrice: null,
+  discountPercent: 0,
+  isOnSale: false,
+  isSale: false
+});
+
+const fillDealsByType = (saleItems: DealListing[], latestItems: DealListing[], type: ListingKind, limit: number): DealListing[] => {
+  const pickedSale = selectDealsByType(saleItems, type, limit, true);
+  if (pickedSale.length >= limit) return pickedSale.slice(0, limit);
+
+  const seen = new Set(pickedSale.map((item) => toDealTypeIdKey(item)));
+  const needed = limit - pickedSale.length;
+  const fallback = selectDealsByType(latestItems, type, limit * 6, false)
+    .filter((item) => !seen.has(toDealTypeIdKey(item)))
+    .slice(0, needed)
+    .map((item) => toFallbackDeal(item));
+
+  return [...pickedSale, ...fallback];
+};
+
+export const getHomeDeals = async (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || "3"), 10) || 3, 1), 24);
+    const scanLimit = Math.max(limit * 8, 24);
+
+    const [saleProductsRaw, saleServicesRaw, latestProductsRaw, latestServicesRaw] = await Promise.all([
+      fetchSaleListingsByType("product", scanLimit),
+      fetchSaleListingsByType("service", scanLimit),
+      fetchHomeListingsByType("product", "newest", scanLimit),
+      fetchHomeListingsByType("service", "newest", scanLimit)
+    ]);
+
+    const [serializedSale, serializedLatest] = await Promise.all([
+      serializeHomeItems([...saleProductsRaw, ...saleServicesRaw]),
+      serializeHomeItems([...latestProductsRaw, ...latestServicesRaw])
+    ]);
+
+    const saleDtos = dedupeDeals(serializedSale.map((item) => normalizeDealDto(item)));
+    const latestDtos = dedupeDeals(serializedLatest.map((item) => normalizeDealDto(item)));
+
+    const products = fillDealsByType(saleDtos, latestDtos, "product", limit);
+    const services = fillDealsByType(saleDtos, latestDtos, "service", limit);
+    products.sort(sortDealItems);
+    services.sort(sortDealItems);
+
+    return res.json({
+      limit,
+      products,
+      services
+    });
+  } catch (err) {
+    console.error("getHomeDeals error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
 export const getTopListings = async (req: Request, res: Response) => {
   try {
-    const limit = Math.min(parseInt(String(req.query.limit || "12"), 10), 50);
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || "12"), 10) || 12, 1), 50);
+    const weeklyOrdersWeight = Number(process.env.WEEKLY_TOP_ORDERS_WEIGHT ?? 5);
+    const weeklyViewsWeight = Number(process.env.WEEKLY_TOP_VIEWS_WEIGHT ?? 0.05);
+    const weeklyLikesWeight = Number(process.env.WEEKLY_TOP_LIKES_WEIGHT ?? 2);
     const { products, services } = await fetchListings();
-    const agentMap = await buildAgentProfilesMap(products, services);
-    const docs = [
-      ...products.map((p) => buildListing("product", p, agentMap)),
-      ...services.map((s) => buildListing("service", s, agentMap))
-    ];
-    const scored = dedupeListingCards(docs)
-      .map((listing) => ({
-        ...listing,
-        score: (listing.stats.likes ?? 0) + (listing.stats.views ?? 0) / 10 + (listing.stats.orders ?? 0) * 5
-      }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
-      .map(({ score, ...rest }) => rest);
-    return res.json({ listings: scored });
+
+    const withWeeklyScore = dedupeListingCards([
+      ...products.map((product) => {
+        const dto = toDetailDto(product);
+        const weeklyLikes = parseNumber((product as any)?.likes_7d ?? (product as any)?.likes7d);
+        const weeklyViews = parseNumber((product as any)?.views_7d ?? (product as any)?.views7d);
+        const weeklyOrders = parseNumber((product as any)?.orders_7d ?? (product as any)?.orders7d);
+        const weeklyScore = weeklyOrders * weeklyOrdersWeight + weeklyViews * weeklyViewsWeight + weeklyLikes * weeklyLikesWeight;
+        return {
+          ...dto,
+          stats: {
+            ...(dto.stats || {}),
+            weeklyLikes,
+            weeklyViews,
+            weeklyOrders
+          },
+          weeklyScore
+        };
+      }),
+      ...services.map((service) => {
+        const dto = attachServiceCover(service);
+        const weeklyLikes = parseNumber((service as any)?.likes_7d ?? (service as any)?.likes7d);
+        const weeklyViews = parseNumber((service as any)?.views_7d ?? (service as any)?.views7d);
+        const weeklyOrders = parseNumber((service as any)?.orders_7d ?? (service as any)?.orders7d);
+        const weeklyScore = weeklyOrders * weeklyOrdersWeight + weeklyViews * weeklyViewsWeight + weeklyLikes * weeklyLikesWeight;
+        return {
+          ...dto,
+          stats: {
+            ...(dto.stats || {}),
+            weeklyLikes,
+            weeklyViews,
+            weeklyOrders
+          },
+          weeklyScore
+        };
+      })
+    ]);
+
+    const weeklyTop = withWeeklyScore
+      .sort((a: any, b: any) => {
+        const scoreDiff = parseNumber(b?.weeklyScore) - parseNumber(a?.weeklyScore);
+        if (scoreDiff !== 0) return scoreDiff;
+        return toDealSortTime(b) - toDealSortTime(a);
+      })
+      .slice(0, limit);
+
+    return res.json({ listings: weeklyTop });
   } catch (err) {
     console.error("getTopListings error", err);
     return res.status(500).json({ message: "Server error" });
@@ -521,13 +768,11 @@ export const getTopListings = async (req: Request, res: Response) => {
 
 export const getLatestListings = async (req: Request, res: Response) => {
   try {
-    const limit = Math.min(parseInt(String(req.query.limit || "12"), 10), 50);
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || "12"), 10) || 12, 1), 50);
     const { products, services } = await fetchListings();
-    const agentMap = await buildAgentProfilesMap(products, services);
-    const docs = dedupeListingCards([
-      ...products.map((p) => buildListing("product", p, agentMap)),
-      ...services.map((s) => buildListing("service", s, agentMap))
-    ]).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const docs = dedupeListingCards([...products.map((p) => toDetailDto(p)), ...services.map((s) => attachServiceCover(s))]).sort(
+      (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+    );
     return res.json({ listings: docs.slice(0, limit) });
   } catch (err) {
     console.error("getLatestListings error", err);

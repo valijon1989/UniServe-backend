@@ -7,6 +7,9 @@ export interface IProduct extends Document {
   title: string;
   description: string;
   price: number;
+  oldPrice?: number;
+  salePrice?: number;
+  discountPercent?: number;
   currency: string;
   images: string[];
   image?: string;
@@ -22,6 +25,9 @@ export interface IProduct extends Document {
   likes?: number;
   views?: number;
   orders?: number;
+  likes_7d?: number;
+  views_7d?: number;
+  orders_7d?: number;
   createdBy: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -33,6 +39,9 @@ const ProductSchema = new Schema<IProduct>(
     slug: { type: String, trim: true, lowercase: true, index: true },
     description: { type: String },
     price: { type: Number, required: true },
+    oldPrice: { type: Number },
+    salePrice: { type: Number },
+    discountPercent: { type: Number },
     currency: { type: String, default: "USD" },
     images: [{ type: String }],
     image: { type: String },
@@ -48,6 +57,9 @@ const ProductSchema = new Schema<IProduct>(
     likes: { type: Number, default: 0 },
     views: { type: Number, default: 0 },
     orders: { type: Number, default: 0 },
+    likes_7d: { type: Number, default: 0 },
+    views_7d: { type: Number, default: 0 },
+    orders_7d: { type: Number, default: 0 },
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true }
   },
   { timestamps: true }

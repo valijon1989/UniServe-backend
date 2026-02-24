@@ -11,6 +11,7 @@ import {
   resolveCoverImage,
   sanitizeImageArray
 } from "../utils/resolveCoverImage";
+import { resolveSaleMeta } from "../services/listingSelector";
 
 const DUPLICATE_GUARD_WINDOW_MS = Number(process.env.DUPLICATE_GUARD_WINDOW_MS || 15_000);
 const SERVICE_FALLBACK = ensureAbsoluteUrl("/images/fallback-service.png") || "http://localhost:5001/images/fallback-service.png";
@@ -84,7 +85,7 @@ const pickCreator = (createdBy: any) => {
   return { _id, name, username, role, avatarUrl };
 };
 
-const attachServiceCover = (service: any) => {
+export const attachServiceCover = (service: any) => {
   const raw = service?.toObject ? service.toObject() : { ...service };
   const creator = pickCreator(raw.createdBy);
   const images = sanitizeImageArray(raw.images);
@@ -92,6 +93,27 @@ const attachServiceCover = (service: any) => {
   const ratingAvg = Number(raw?.ratingAvg ?? raw?.rating?.avg ?? 0);
   const ratingCount = Number(raw?.ratingCount ?? raw?.rating?.count ?? 0);
   const price = Number(raw?.price ?? raw?.hourlyRate);
+  const likes = Number(raw?.stats?.likes ?? raw?.likes ?? 0);
+  const views = Number(raw?.stats?.views ?? raw?.views ?? 0);
+  const orders = Number(raw?.stats?.orders ?? raw?.stats?.purchases ?? raw?.orders ?? raw?.purchases ?? 0);
+  const saleMeta = resolveSaleMeta({
+    basePrice: Number.isFinite(price) ? price : null,
+    salePrice: raw?.salePrice,
+    discountPercent: raw?.discountPercent,
+    oldPrice: raw?.oldPrice
+  });
+  const salePrice = saleMeta.salePrice ?? (Number.isFinite(price) ? price : null);
+  const discountPercent = saleMeta.discountPercent ?? 0;
+  const originalPrice = saleMeta.originalPrice ?? (Number.isFinite(price) ? price : null);
+  const isOnSale = saleMeta.isSale;
+  const agent = creator
+    ? {
+        id: creator._id?.toString?.() || String(creator._id || ""),
+        name: creator.name || "UniServe Agent",
+        avatarUrl: creator.avatarUrl || null,
+        rating: ratingAvg
+      }
+    : undefined;
 
   return {
     _id: raw._id,
@@ -105,9 +127,25 @@ const attachServiceCover = (service: any) => {
     currency: raw.currency ?? "USD",
     location: raw.location,
     price: Number.isFinite(price) ? price : null,
+    salePrice,
+    originalPrice,
+    oldPrice: originalPrice,
+    discountPercent,
+    isOnSale,
+    isSale: isOnSale,
+    likes,
+    views,
+    orders,
+    stats: {
+      likes,
+      views,
+      orders,
+      purchases: orders
+    },
     ratingAvg,
     ratingCount: Number.isFinite(ratingCount) ? ratingCount : 0,
     createdBy: creator,
+    agent,
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
     images,
@@ -190,13 +228,29 @@ export const createService = async (req: Request, res: Response) => {
 
 export const listServices = async (req: Request, res: Response) => {
   try {
-    const services = await Service.find()
-      .populate("createdBy", "name username role avatarUrl")
-      .lean();
+    const page = parsePositiveInt(req.query.page, 1, 1000000);
+    const limit = parsePositiveInt(req.query.limit, 24, 50);
+    const skip = (page - 1) * limit;
 
-    const enrichedServices = services.map((service) => attachServiceCover(service));
+    const [items, total] = await Promise.all([
+      Service.find({})
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate("createdBy", "name username role avatarUrl")
+        .lean(),
+      Service.countDocuments({})
+    ]);
 
-    return res.json({ services: enrichedServices });
+    const services = items.map((service) => attachServiceCover(service));
+
+    return res.json({
+      page,
+      limit,
+      total,
+      totalPages: Math.max(Math.ceil(total / limit), 1),
+      services
+    });
   } catch (err) {
     console.error("listServices error", err);
     return res.status(500).json({ message: "Server error" });

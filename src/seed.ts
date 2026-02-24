@@ -227,72 +227,129 @@ export async function seedIfEmpty() {
 
   await Product.insertMany([
     {
+      slug: "seed-sony-a7-iv-body",
       title: "Sony A7 IV Body",
       description: "Full-frame mirrorless camera body, great for photo & video.",
       price: 2300,
+      salePrice: 1990,
+      discountPercent: 13,
       currency: "USD",
       images: ["/static/products/sony_a7iv.jpg"],
       category: "Camera",
       status: "ACTIVE",
+      likes: 120,
+      views: 2100,
+      orders: 140,
+      likes_7d: 32,
+      views_7d: 640,
+      orders_7d: 18,
       createdBy: seller1._id
     },
     {
+      slug: "seed-canon-r6-mark-ii-kit",
       title: "Canon R6 Mark II Kit",
       description: "24-105mm lens included, perfect hybrid camera.",
       price: 2600,
+      salePrice: 2240,
+      discountPercent: 14,
       currency: "USD",
       images: ["/static/products/canon_r6m2.jpg"],
       category: "Camera",
       status: "ACTIVE",
+      likes: 94,
+      views: 1760,
+      orders: 116,
+      likes_7d: 21,
+      views_7d: 520,
+      orders_7d: 14,
       createdBy: seller1._id
     },
     {
+      slug: "seed-fujifilm-xs20-vlogger-set",
       title: "Fujifilm X-S20 Vlogger Set",
       description: "APS-C camera with prime lens and mic for content creators.",
       price: 1800,
+      salePrice: 1530,
+      discountPercent: 15,
       currency: "USD",
       images: ["/static/products/fuji_xs20.jpg"],
       category: "Camera",
       status: "ACTIVE",
+      likes: 88,
+      views: 1490,
+      orders: 92,
+      likes_7d: 18,
+      views_7d: 470,
+      orders_7d: 12,
       createdBy: seller1._id
     }
   ]);
 
   await Service.insertMany([
     {
+      slug: "seed-korean-language-class-online",
       title: "Korean Language Class (online)",
       description: "Beginner to intermediate Korean lessons via Zoom.",
       kind: "SOCIAL",
       category: "Language teaching",
       hourlyRate: 25,
+      price: 25,
+      salePrice: 20,
+      discountPercent: 20,
       currency: "USD",
       location: "Online",
+      likes: 102,
+      views: 1950,
+      orders: 123,
+      likes_7d: 28,
+      views_7d: 610,
+      orders_7d: 19,
       images: [
         "https://images.unsplash.com/photo-1529333166437-7750a6dd5a70?auto=format&fit=crop&w=800&q=80"
       ],
       createdBy: service1._id
     },
     {
+      slug: "seed-document-translation-korean-english",
       title: "Document Translation (Korean-English)",
       description: "Official-style translation for study & migration documents.",
       kind: "SOCIAL",
       category: "Translation",
       hourlyRate: 30,
+      price: 30,
+      salePrice: 24,
+      discountPercent: 20,
       currency: "USD",
       location: "Cheonan",
+      likes: 96,
+      views: 1820,
+      orders: 114,
+      likes_7d: 24,
+      views_7d: 560,
+      orders_7d: 16,
       images: [
         "https://images.unsplash.com/photo-1520607162513-77705c0f0d4a?auto=format&fit=crop&w=800&q=80"
       ],
       createdBy: service1._id
     },
     {
+      slug: "seed-airport-delivery-support",
       title: "Airport Delivery Support",
       description: "Helping with luggage, pickup and delivery in Seoul area.",
       kind: "MATERIAL",
       category: "Delivery",
       hourlyRate: 20,
+      price: 20,
+      salePrice: 16,
+      discountPercent: 20,
       currency: "USD",
       location: "Seoul",
+      likes: 84,
+      views: 1640,
+      orders: 101,
+      likes_7d: 20,
+      views_7d: 490,
+      orders_7d: 13,
       images: [
         "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=800&q=80"
       ],
@@ -659,6 +716,129 @@ async function seedAgentListingsIfMissing() {
     }
   ];
 
+  const saleProductSeeds = [
+    {
+      slug: "seed-dev-sale-product-1",
+      title: "Seed Dev Sale Product 1",
+      description: "Guaranteed discounted product #1 for /deals endpoint",
+      category: "Camera",
+      price: 2400,
+      salePrice: 1990,
+      discountPercent: 17,
+      currency: "USD",
+      images: ["/static/products/sony_a7iv.jpg"],
+      coverImageUrl: "/static/products/sony_a7iv.jpg",
+      likes: 118,
+      views: 2400,
+      orders: 155,
+      likes_7d: 30,
+      views_7d: 760,
+      orders_7d: 22
+    },
+    {
+      slug: "seed-dev-sale-product-2",
+      title: "Seed Dev Sale Product 2",
+      description: "Guaranteed discounted product #2 for /deals endpoint",
+      category: "Camera",
+      price: 2600,
+      salePrice: 2190,
+      discountPercent: 16,
+      currency: "USD",
+      images: ["/static/products/canon_r6m2.jpg"],
+      coverImageUrl: "/static/products/canon_r6m2.jpg",
+      likes: 102,
+      views: 2100,
+      orders: 139,
+      likes_7d: 25,
+      views_7d: 680,
+      orders_7d: 18
+    },
+    {
+      slug: "seed-dev-sale-product-3",
+      title: "Seed Dev Sale Product 3",
+      description: "Guaranteed discounted product #3 for /deals endpoint",
+      category: "Camera",
+      price: 1900,
+      salePrice: 1590,
+      discountPercent: 16,
+      currency: "USD",
+      images: ["/static/products/fuji_xs20.jpg"],
+      coverImageUrl: "/static/products/fuji_xs20.jpg",
+      likes: 89,
+      views: 1850,
+      orders: 121,
+      likes_7d: 22,
+      views_7d: 590,
+      orders_7d: 16
+    }
+  ];
+
+  const saleServiceSeeds = [
+    {
+      slug: "seed-dev-sale-service-1",
+      title: "Seed Dev Sale Service 1",
+      description: "Guaranteed discounted service #1 for /deals endpoint",
+      kind: "SOCIAL" as const,
+      category: "Translation",
+      hourlyRate: 30,
+      price: 30,
+      salePrice: 24,
+      discountPercent: 20,
+      currency: "USD",
+      location: "Online",
+      images: ["/static/services/translation/14.jpg"],
+      coverImageUrl: "/static/services/translation/14.jpg",
+      likes: 110,
+      views: 2200,
+      orders: 147,
+      likes_7d: 27,
+      views_7d: 710,
+      orders_7d: 20
+    },
+    {
+      slug: "seed-dev-sale-service-2",
+      title: "Seed Dev Sale Service 2",
+      description: "Guaranteed discounted service #2 for /deals endpoint",
+      kind: "MATERIAL" as const,
+      category: "Delivery",
+      hourlyRate: 26,
+      price: 26,
+      salePrice: 21,
+      discountPercent: 19,
+      currency: "USD",
+      location: "Seoul",
+      images: ["/static/services/delivery/14.jpg"],
+      coverImageUrl: "/static/services/delivery/14.jpg",
+      likes: 104,
+      views: 2080,
+      orders: 132,
+      likes_7d: 24,
+      views_7d: 650,
+      orders_7d: 17
+    },
+    {
+      slug: "seed-dev-sale-service-3",
+      title: "Seed Dev Sale Service 3",
+      description: "Guaranteed discounted service #3 for /deals endpoint",
+      kind: "SOCIAL" as const,
+      category: "Language teaching",
+      hourlyRate: 22,
+      price: 22,
+      salePrice: 18,
+      discountPercent: 18,
+      currency: "USD",
+      location: "Cheonan",
+      images: ["/static/services/consulting/14.jpg"],
+      coverImageUrl: "/static/services/consulting/14.jpg",
+      likes: 96,
+      views: 1920,
+      orders: 125,
+      likes_7d: 21,
+      views_7d: 610,
+      orders_7d: 15
+    }
+  ];
+
   for (const agent of agents) {
     const profile = profileByUser.get(String(agent._id));
     const kind = profile?.kind || "SERVICE";
@@ -684,6 +864,122 @@ async function seedAgentListingsIfMissing() {
         createdBy: agent._id
       }));
       await Service.insertMany(seededServices);
+    }
+  }
+
+  const sellerAgent =
+    agents.find((agent) => (profileByUser.get(String(agent._id))?.kind || "SERVICE") === "SELLER") || agents[0];
+  const serviceAgent =
+    agents.find((agent) => (profileByUser.get(String(agent._id))?.kind || "SERVICE") === "SERVICE") || agents[0];
+
+  if (sellerAgent) {
+    await AgentProfile.findOneAndUpdate(
+      { user: sellerAgent._id },
+      {
+        $set: {
+          kind: "SELLER",
+          verifiedByAdmin: true
+        },
+        $setOnInsert: {
+          user: sellerAgent._id,
+          socialServices: [],
+          materialServices: ["Delivery", "Electronics resale"],
+          rating: 4.7,
+          ratingCount: 8
+        }
+      },
+      { upsert: true, new: true }
+    );
+  }
+  if (serviceAgent) {
+    await AgentProfile.findOneAndUpdate(
+      { user: serviceAgent._id },
+      {
+        $set: {
+          kind: "SERVICE",
+          verifiedByAdmin: true
+        },
+        $setOnInsert: {
+          user: serviceAgent._id,
+          socialServices: ["Translation", "Consulting"],
+          materialServices: [],
+          rating: 4.8,
+          ratingCount: 10
+        }
+      },
+      { upsert: true, new: true }
+    );
+  }
+
+  if (sellerAgent) {
+    for (const saleProductSeed of saleProductSeeds) {
+      await Product.updateOne(
+        { slug: saleProductSeed.slug },
+        {
+          $set: {
+            title: saleProductSeed.title,
+            slug: saleProductSeed.slug,
+            description: saleProductSeed.description,
+            category: saleProductSeed.category,
+            price: saleProductSeed.price,
+            salePrice: saleProductSeed.salePrice,
+            discountPercent: saleProductSeed.discountPercent,
+            currency: saleProductSeed.currency,
+            images: saleProductSeed.images,
+            coverImageUrl: saleProductSeed.coverImageUrl,
+            coverImage: saleProductSeed.coverImageUrl,
+            imageUrl: saleProductSeed.coverImageUrl,
+            image: saleProductSeed.coverImageUrl,
+            thumbnail: saleProductSeed.coverImageUrl,
+            status: "ACTIVE",
+            likes: saleProductSeed.likes,
+            views: saleProductSeed.views,
+            orders: saleProductSeed.orders,
+            likes_7d: saleProductSeed.likes_7d,
+            views_7d: saleProductSeed.views_7d,
+            orders_7d: saleProductSeed.orders_7d,
+            createdBy: sellerAgent._id
+          }
+        },
+        { upsert: true }
+      );
+    }
+  }
+
+  if (serviceAgent) {
+    for (const saleServiceSeed of saleServiceSeeds) {
+      await Service.updateOne(
+        { slug: saleServiceSeed.slug },
+        {
+          $set: {
+            title: saleServiceSeed.title,
+            slug: saleServiceSeed.slug,
+            description: saleServiceSeed.description,
+            kind: saleServiceSeed.kind,
+            category: saleServiceSeed.category,
+            hourlyRate: saleServiceSeed.hourlyRate,
+            price: saleServiceSeed.price,
+            salePrice: saleServiceSeed.salePrice,
+            discountPercent: saleServiceSeed.discountPercent,
+            currency: saleServiceSeed.currency,
+            location: saleServiceSeed.location,
+            images: saleServiceSeed.images,
+            coverImageUrl: saleServiceSeed.coverImageUrl,
+            coverImage: saleServiceSeed.coverImageUrl,
+            imageUrl: saleServiceSeed.coverImageUrl,
+            image: saleServiceSeed.coverImageUrl,
+            cardImageUrl: saleServiceSeed.coverImageUrl,
+            likes: saleServiceSeed.likes,
+            views: saleServiceSeed.views,
+            orders: saleServiceSeed.orders,
+            likes_7d: saleServiceSeed.likes_7d,
+            views_7d: saleServiceSeed.views_7d,
+            orders_7d: saleServiceSeed.orders_7d,
+            createdBy: serviceAgent._id
+          }
+        },
+        { upsert: true }
+      );
     }
   }
 

@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import { User } from "../models/User";
 import { signToken } from "../utils/jwt";
+import { sanitizeUser } from "../utils/userSanitizer";
 
 const slugify = (value: string) =>
   value
@@ -123,9 +124,9 @@ export const login = async (req: Request, res: Response) => {
 export const me = async (req: Request, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ message: "Not authenticated" });
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user._id).lean();
     if (!user) return res.status(404).json({ message: "User not found" });
-    return res.json({ user });
+    return res.json({ user: sanitizeUser(user) });
   } catch (err) {
     console.error("me error", err);
     return res.status(500).json({ message: "Server error" });

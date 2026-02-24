@@ -16,7 +16,10 @@
     "fill:listings-images": "ts-node scripts/fillMissingListingImages.ts",
     "fix:agent-avatars": "ts-node scripts/fixAgentAvatarUrls.ts",
     "check:agents-integrity": "ts-node scripts/checkAgentsIntegrity.ts",
-    "fix:agents-integrity": "ts-node scripts/checkAgentsIntegrity.ts --fix"
+    "fix:agents-integrity": "ts-node scripts/checkAgentsIntegrity.ts --fix",
+    "seed:home-listings": "ts-node scripts/seedHomeListings.ts",
+    "test:listing-selector": "node --test -r ts-node/register tests/listingSelector.test.ts",
+    "test:backend": "node --test -r ts-node/register tests/*.test.ts"
   },
   "dependencies": {
     "@types/cookie-parser": "^1.4.10",

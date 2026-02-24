@@ -13,6 +13,7 @@ import {
   resolveCoverImage,
   sanitizeImageArray
 } from "../utils/resolveCoverImage";
+import { resolveSaleMeta } from "../services/listingSelector";
 
 type DeliveryInfo = {
   type: string;
@@ -266,13 +267,22 @@ const findProductByLegacyIdentifier = async (identifier: string) => {
     .populate("createdBy", "name username role avatarUrl");
 };
 
-const toDetailDto = (p: any) => {
+export const toDetailDto = (p: any) => {
   const name = p.name || p.title;
   const price = Number(p.price || 0);
   const oldPrice = p.oldPrice ?? (price ? Math.round(price * 1.12) : undefined);
   const rating = p.rating || { avg: 0, count: 0 };
   const ratingCount = Number(p.ratingCount ?? rating.count ?? 0);
-  const stats = p.stats || { views: p.views || 0, likes: p.likes || 0, purchases: p.orders || 0 };
+  const likes = Number(p?.stats?.likes ?? p.likes ?? 0);
+  const views = Number(p?.stats?.views ?? p.views ?? 0);
+  const orders = Number(p?.stats?.orders ?? p?.stats?.purchases ?? p.orders ?? p.purchases ?? 0);
+  const stats = { views, likes, orders, purchases: orders };
+  const saleMeta = resolveSaleMeta({
+    basePrice: price,
+    salePrice: p.salePrice,
+    discountPercent: p.discountPercent,
+    oldPrice: p.oldPrice
+  });
   const delivery = buildDeliveryInfo(p);
   const seller = buildSellerInfo(p);
   const badges = buildBadges(p);
@@ -285,6 +295,19 @@ const toDetailDto = (p: any) => {
   const reviewSummary = buildReviewSummary(p);
   const images = normalizeImages(p);
   const coverImageUrl = resolveCoverImage(p);
+  const creator = p?.createdBy && typeof p.createdBy === "object" ? p.createdBy : null;
+  const agent = creator
+    ? {
+        id: creator._id?.toString?.() || String(creator._id || ""),
+        name: creator.name || seller.name || "UniServe Agent",
+        avatarUrl: creator.avatarUrl || null,
+        rating: Number(seller.rating || 0)
+      }
+    : undefined;
+  const salePrice = saleMeta.salePrice ?? (Number.isFinite(price) ? price : null);
+  const discountPercent = saleMeta.discountPercent ?? 0;
+  const isOnSale = saleMeta.isSale;
+  const originalPrice = saleMeta.originalPrice ?? oldPrice ?? (Number.isFinite(price) ? price : null);
 
   return {
     _id: p._id?.toString?.() ?? p.id ?? p.slug,
@@ -294,8 +317,13 @@ const toDetailDto = (p: any) => {
     name,
     description: p.description || "",
     price,
+    salePrice,
+    originalPrice,
+    discountPercent,
+    isOnSale,
+    isSale: isOnSale,
     currency: p.currency || "UZS",
-    oldPrice,
+    oldPrice: originalPrice,
     thumbnail: coverImageUrl,
     image: coverImageUrl,
     imageUrl: coverImageUrl,
@@ -307,6 +335,9 @@ const toDetailDto = (p: any) => {
     ratingAvg: Number(p.ratingAvg ?? rating.avg ?? 0),
     ratingCount: Number.isFinite(ratingCount) ? ratingCount : 0,
     reviewSummary,
+    likes,
+    views,
+    orders,
     stats,
     category: p.category,
     subCategory: p.subCategory,
@@ -316,6 +347,7 @@ const toDetailDto = (p: any) => {
     season: p.season,
     audience: p.audience,
     vendor: p.vendor || p.createdBy,
+    agent,
     badges,
     highlights,
     delivery,
@@ -326,6 +358,7 @@ const toDetailDto = (p: any) => {
     policies,
     stock: p.stock ?? p.quantity ?? 24,
     createdAt: p.createdAt ? new Date(p.createdAt) : undefined,
+    updatedAt: p.updatedAt ? new Date(p.updatedAt) : undefined,
     detailSections
   };
 };

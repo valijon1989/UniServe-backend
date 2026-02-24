@@ -8,6 +8,7 @@ import { Service } from "../models/Service";
 import { parsePositiveInt } from "../utils/pagination";
 import { resolveAvatarUrl } from "../utils/avatarImage";
 import { resolveCoverImage, sanitizeImageArray } from "../utils/resolveCoverImage";
+import { sanitizeUser } from "../utils/userSanitizer";
 
 const constructionAreas = ["interior", "exterior"];
 const constructionServices = [
@@ -134,7 +135,9 @@ export const myAgentProfile = async (req: Request, res: Response) => {
     if (!req.user) return res.status(401).json({ message: "Not authenticated" });
     const profile = await AgentProfile.findOne({ user: req.user._id }).populate("user");
     if (!profile) return res.status(404).json({ message: "Agent profile not found" });
-    return res.json({ profile });
+    const profileObj = profile.toObject();
+    const user = sanitizeUser(profileObj.user);
+    return res.json({ profile: { ...profileObj, user } });
   } catch (err) {
     console.error("myAgentProfile error", err);
     return res.status(500).json({ message: "Server error" });
@@ -308,7 +311,7 @@ export const listAgents = async (req: Request, res: Response) => {
         ...agent,
         user: agent?.user
           ? {
-              ...agent.user,
+              ...(sanitizeUser(agent.user) || {}),
               avatarUrl: resolveAvatarUrl(agent.user.avatarUrl, agent.user._id || agent._id)
             }
           : agent.user
@@ -523,10 +526,20 @@ export const upsertAgentReview = async (req: Request, res: Response) => {
 };
 export const topVerifiedAgents = async (req: Request, res: Response) => {
   try {
-    const limit = Math.min(Number(req.query.limit) || 10, 50);
+    const limit = parsePositiveInt(req.query.limit, 10, 50);
+    const kindRaw = typeof req.query.kind === "string" ? req.query.kind.trim().toUpperCase() : "";
+    const kindFilter = kindRaw === "SELLER" || kindRaw === "SERVICE" ? kindRaw : null;
+    const requireVerifiedByAdmin = String(process.env.TOP_AGENTS_REQUIRE_VERIFIED_ADMIN ?? "true").toLowerCase() !== "false";
+    const weeklyOrdersWeight = Number(process.env.AGENT_WEEKLY_ORDERS_WEIGHT ?? 5);
+    const weeklyViewsWeight = Number(process.env.AGENT_WEEKLY_VIEWS_WEIGHT ?? 0.05);
+    const weeklyLikesWeight = Number(process.env.AGENT_WEEKLY_LIKES_WEIGHT ?? 2);
     const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const profileMatch: Record<string, unknown> = {};
+    if (requireVerifiedByAdmin) profileMatch.verifiedByAdmin = true;
+    if (kindFilter) profileMatch.kind = kindFilter;
+
     const agents = await AgentProfile.aggregate([
-      { $match: { verifiedByAdmin: true } },
+      { $match: profileMatch },
       {
         $lookup: {
           from: "users",
@@ -552,7 +565,10 @@ export const topVerifiedAgents = async (req: Request, res: Response) => {
                   }
                 },
                 orders: { $sum: { $ifNull: ["$orders", 0] } },
-                views: { $sum: { $ifNull: ["$views", 0] } }
+                views: { $sum: { $ifNull: ["$views", 0] } },
+                weeklyOrders: { $sum: { $ifNull: ["$orders_7d", { $ifNull: ["$orders7d", 0] }] } },
+                weeklyViews: { $sum: { $ifNull: ["$views_7d", { $ifNull: ["$views7d", 0] }] } },
+                weeklyLikes: { $sum: { $ifNull: ["$likes_7d", { $ifNull: ["$likes7d", 0] }] } }
               }
             }
           ],
@@ -575,7 +591,10 @@ export const topVerifiedAgents = async (req: Request, res: Response) => {
                   }
                 },
                 orders: { $sum: { $ifNull: ["$orders", 0] } },
-                views: { $sum: { $ifNull: ["$views", 0] } }
+                views: { $sum: { $ifNull: ["$views", 0] } },
+                weeklyOrders: { $sum: { $ifNull: ["$orders_7d", { $ifNull: ["$orders7d", 0] }] } },
+                weeklyViews: { $sum: { $ifNull: ["$views_7d", { $ifNull: ["$views7d", 0] }] } },
+                weeklyLikes: { $sum: { $ifNull: ["$likes_7d", { $ifNull: ["$likes7d", 0] }] } }
               }
             }
           ],
@@ -601,6 +620,15 @@ export const topVerifiedAgents = async (req: Request, res: Response) => {
           },
           listingsViews: {
             $add: [{ $ifNull: ["$productStats.views", 0] }, { $ifNull: ["$serviceStats.views", 0] }]
+          },
+          weeklyOrders: {
+            $add: [{ $ifNull: ["$productStats.weeklyOrders", 0] }, { $ifNull: ["$serviceStats.weeklyOrders", 0] }]
+          },
+          weeklyViews: {
+            $add: [{ $ifNull: ["$productStats.weeklyViews", 0] }, { $ifNull: ["$serviceStats.weeklyViews", 0] }]
+          },
+          weeklyLikes: {
+            $add: [{ $ifNull: ["$productStats.weeklyLikes", 0] }, { $ifNull: ["$serviceStats.weeklyLikes", 0] }]
           }
         }
       },
@@ -608,10 +636,9 @@ export const topVerifiedAgents = async (req: Request, res: Response) => {
         $addFields: {
           weeklyScore: {
             $add: [
-              { $multiply: [{ $ifNull: ["$weeklyListingsCount", 0] }, 3] },
-              { $multiply: [{ $ifNull: ["$listingsOrders", 0] }, 2] },
-              { $multiply: [{ $ifNull: ["$listingsViews", 0] }, 0.05] },
-              { $multiply: [{ $ifNull: ["$rating", 0] }, 5] }
+              { $multiply: [{ $ifNull: ["$weeklyOrders", 0] }, weeklyOrdersWeight] },
+              { $multiply: [{ $ifNull: ["$weeklyViews", 0] }, weeklyViewsWeight] },
+              { $multiply: [{ $ifNull: ["$weeklyLikes", 0] }, weeklyLikesWeight] }
             ]
           }
         }
@@ -630,15 +657,13 @@ export const topVerifiedAgents = async (req: Request, res: Response) => {
           weeklyListingsCount: 1,
           listingsOrders: 1,
           listingsViews: 1,
+          weeklyOrders: 1,
+          weeklyViews: 1,
+          weeklyLikes: 1,
           weeklyScore: 1,
-          createdAt: 1,
-          updatedAt: 1,
-          "user._id": 1,
           "user.name": 1,
           "user.username": 1,
-          "user.avatarUrl": 1,
-          "user.bio": 1,
-          "user.region": 1
+          "user.avatarUrl": 1
         }
       }
     ]);
@@ -648,12 +673,17 @@ export const topVerifiedAgents = async (req: Request, res: Response) => {
       user: agent?.user
         ? {
             ...agent.user,
-            avatarUrl: resolveAvatarUrl(agent.user.avatarUrl, agent.user._id || agent._id)
+            avatarUrl: resolveAvatarUrl(agent.user.avatarUrl, agent._id)
           }
         : agent.user
     }));
 
-    return res.json({ agents: normalizedAgents, limit });
+    return res.json({
+      agents: normalizedAgents,
+      limit,
+      kind: kindFilter,
+      verifiedByAdminRequired: requireVerifiedByAdmin
+    });
   } catch (err) {
     console.error("topVerifiedAgents error", err);
     return res.status(500).json({ message: "Server error" });

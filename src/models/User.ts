@@ -24,7 +24,7 @@ const UserSchema = new Schema<IUser>(
     email: { type: String, unique: true, required: true, lowercase: true, trim: true },
     passwordHash: { type: String, required: true },
     name: { type: String, required: true },
-    username: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    username: { type: String, required: true, lowercase: true, trim: true },
     role: { type: String, enum: ["USER", "AGENT", "ADMIN"], default: "USER" },
     isVerified: { type: Boolean, default: false },
     isPrivate: { type: Boolean, default: false },
@@ -36,5 +36,7 @@ const UserSchema = new Schema<IUser>(
   },
   { timestamps: true }
 );
+
+UserSchema.index({ username: 1 }, { unique: true });
 
 export const User = mongoose.model<IUser>("User", UserSchema);

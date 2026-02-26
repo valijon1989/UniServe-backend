@@ -7,18 +7,18 @@ import path from "path";
 import fs from "fs";
 import { createServer } from "http";
 import { connectDb } from "./config/db";
-import authRoutes from "./routes/authRoutes";
+import authRoutes from "./routes/auth.routes";
 import agentRoutes from "./routes/agentRoutes";
 import listingRoutes from "./routes/listingRoutes";
 import homeRoutes from "./routes/homeRoutes";
 import productRoutes from "./routes/productRoutes";
 import serviceRoutes from "./routes/serviceRoutes";
-import postRoutes from "./routes/postRoutes";
+import postRoutes from "./routes/posts.routes";
 import adminRoutes from "./routes/adminRoutes";
 import feedRoutes from "./routes/feedRoutes";
 import agentListingsRoutes from "./routes/agentListingsRoutes";
 import userRoutes from "./routes/userRoutes";
-import meRoutes from "./routes/me.routes";
+import usersRoutes from "./routes/users.routes";
 import searchRoutes from "./routes/searchRoutes";
 import taxiRoutes from "./routes/taxiRoutes";
 import educationRoutes from "./routes/educationRoutes";
@@ -30,6 +30,7 @@ import newsRoutes from "./routes/newsRoutes";
 import { initWebsocket } from "./utils/websocket";
 import { seedIfEmpty } from "./seed";
 import { categoriesHandler } from "./stubs/categories";
+import { securityHeaders } from "./middlewares/securityHeaders";
 
 const app = express();
 
@@ -55,9 +56,15 @@ app.use(
 app.options("*", cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
+app.use(securityHeaders);
 app.use(morgan("dev"));
 
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
+const avatarUploadsDir = path.join(__dirname, "..", "uploads", "avatars");
+if (!fs.existsSync(avatarUploadsDir)) {
+  fs.mkdirSync(avatarUploadsDir, { recursive: true });
+}
+app.use("/api/media/avatars", express.static(avatarUploadsDir));
 const staticCandidates = [
   path.join(__dirname, "static"),
   path.join(__dirname, "..", "static"),
@@ -98,7 +105,7 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/feed", feedRoutes);
 app.use("/api/agent/listings", agentListingsRoutes);
 app.use("/api/user", userRoutes);
-app.use("/api/users", meRoutes);
+app.use("/api/users", usersRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api/taxi", taxiRoutes);
 app.use("/api/education", educationRoutes);

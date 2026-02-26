@@ -1,11 +1,16 @@
+import { resolveAvatarUrl } from "./avatarImage";
+
 type GenericRecord = Record<string, unknown>;
 
 const SECRET_USER_FIELDS = new Set([
   "passwordHash",
   "password",
+  "tokenVersion",
   "resetToken",
   "resetPasswordToken",
   "resetPasswordExpires",
+  "resetPasswordTokenHash",
+  "resetPasswordExpiresAt",
   "emailVerificationToken",
   "emailVerificationCode",
   "twoFactorSecret",
@@ -39,14 +44,22 @@ export const sanitizeUser = (value: unknown): GenericRecord | null => {
     delete sanitized[key];
   }
 
-  if (sanitized._id !== undefined) {
-    sanitized._id = normalizeId(sanitized._id);
-  }
-  if (sanitized.id === undefined && sanitized._id !== undefined) {
-    sanitized.id = sanitized._id;
+  const normalizedInternalId = sanitized._id !== undefined ? normalizeId(sanitized._id) : undefined;
+
+  if (sanitized.id === undefined && normalizedInternalId !== undefined) {
+    sanitized.id = normalizedInternalId;
   } else if (sanitized.id !== undefined) {
     sanitized.id = normalizeId(sanitized.id);
   }
+
+  if (sanitized.avatarUrl !== undefined || sanitized.id !== undefined || normalizedInternalId !== undefined) {
+    sanitized.avatarUrl = resolveAvatarUrl(
+      typeof sanitized.avatarUrl === "string" ? sanitized.avatarUrl : "",
+      String(sanitized.id || normalizedInternalId || "user")
+    );
+  }
+
+  delete sanitized._id;
 
   return sanitized;
 };

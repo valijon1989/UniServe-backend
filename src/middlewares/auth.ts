@@ -1,27 +1,15 @@
 import { Request, Response, NextFunction } from "express";
-import { verifyToken } from "../utils/jwt";
+import { verifyAccessToken } from "../utils/jwt";
+import { requireAuth } from "./requireAuth";
 
-export function authRequired(req: Request, res: Response, next: NextFunction) {
-  const header = req.headers.authorization;
-  if (!header || !header.startsWith("Bearer ")) {
-    return res.status(401).json({ message: "Authorization header missing" });
-  }
-  const token = header.substring(7);
-  try {
-    const payload = verifyToken(token);
-    req.user = { _id: payload._id, role: payload.role };
-    return next();
-  } catch {
-    return res.status(401).json({ message: "Invalid or expired token" });
-  }
-}
+export const authRequired = requireAuth;
 
 export function authOptional(req: Request, _res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   if (header && header.startsWith("Bearer ")) {
     const token = header.substring(7);
     try {
-      const payload = verifyToken(token);
+      const payload = verifyAccessToken(token);
       req.user = { _id: payload._id, role: payload.role };
     } catch {
       // ignore invalid token for optional auth

@@ -10,6 +10,7 @@ import { resolveAvatarUrl } from "../utils/avatarImage";
 import { resolveCoverImage, sanitizeImageArray } from "../utils/resolveCoverImage";
 import { sanitizeUser } from "../utils/userSanitizer";
 
+const allowedSeatCapacities = [4, 7, 9, 13, 20, 30, 40];
 const constructionAreas = ["interior", "exterior"];
 const constructionServices = [
   "facade",
@@ -26,6 +27,103 @@ const constructionServices = [
   "tile",
   "other"
 ];
+
+const supportedServiceCategories = [
+  "language",
+  "translation",
+  "consulting",
+  "legal",
+  "delivery",
+  "taxi",
+  "repair",
+  "education",
+  "construction",
+  "logistics",
+  "moving",
+  "cleaning",
+  "psychology",
+  "sports",
+  "products",
+  "platform"
+];
+
+const kindAliases: Record<"SELLER" | "SERVICE", Set<string>> = {
+  SELLER: new Set(["seller", "material", "material-agent", "marketplace", "shop"]),
+  SERVICE: new Set(["service", "social", "spiritual", "service-agent", "ma-naviy"])
+};
+
+const normalizeSlug = (value: unknown) => {
+  if (typeof value !== "string") return undefined;
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return normalized || undefined;
+};
+
+const normalizeServiceCategory = (value: unknown) => {
+  const slug = normalizeSlug(value);
+  if (!slug) return undefined;
+
+  const aliasMap: Record<string, string> = {
+    product: "products",
+    shopping: "products",
+    shop: "products",
+    law: "legal",
+    consult: "consulting",
+    courier: "delivery",
+    shipping: "delivery",
+    transport: "logistics",
+    renovation: "construction"
+  };
+  return aliasMap[slug] || slug;
+};
+
+const normalizeKind = (value: unknown, category?: string): "SELLER" | "SERVICE" | null => {
+  const slug = normalizeSlug(value);
+  if (slug) {
+    if (kindAliases.SELLER.has(slug)) return "SELLER";
+    if (kindAliases.SERVICE.has(slug)) return "SERVICE";
+    return null;
+  }
+
+  // No explicit kind provided -> infer a reasonable default from category
+  if (category === "products") return "SELLER";
+  return "SERVICE";
+};
+
+const toStringArray = (value: unknown) => {
+  if (!Array.isArray(value)) return [] as string[];
+  const normalized = value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean);
+  return Array.from(new Set(normalized));
+};
+
+const normalizeSlugArray = (value: unknown) => {
+  const normalized = toStringArray(value).map((entry) => normalizeSlug(entry)).filter(Boolean) as string[];
+  return Array.from(new Set(normalized));
+};
+
+export const getAgentTypes = async (_req: Request, res: Response) => {
+  return res.json({
+    kinds: [
+      { value: "SERVICE", label: "Service Agent" },
+      { value: "SELLER", label: "Seller Agent" }
+    ],
+    categories: supportedServiceCategories,
+    defaults: {
+      kind: "SERVICE"
+    },
+    constraints: {
+      taxi: { seatCapacities: allowedSeatCapacities },
+      construction: { areas: constructionAreas, services: constructionServices },
+      education: { requiresAtLeastOne: ["educationCategories", "educationLanguages", "educationSkills", "educationSpecialties"] }
+    }
+  });
+};
 
 export const becomeAgent = async (req: Request, res: Response) => {
   try {
@@ -45,13 +143,26 @@ export const becomeAgent = async (req: Request, res: Response) => {
       educationSkills,
       educationSpecialties
     } = req.body;
-    const allowedSeatCapacities = [4, 7, 9, 13, 20, 30, 40];
+    const normalizedServiceCategory = normalizeServiceCategory(serviceCategory);
+    const normalizedKind = normalizeKind(kind, normalizedServiceCategory);
+    if (!normalizedKind) {
+      return res.status(400).json({ message: "Invalid kind. Use SELLER or SERVICE" });
+    }
+
+    const normalizedSocialServices = toStringArray(socialServices);
+    const normalizedMaterialServices = toStringArray(materialServices);
+    const normalizedEducationCategories = toStringArray(educationCategories);
+    const normalizedEducationLanguages = toStringArray(educationLanguages);
+    const normalizedEducationSkills = toStringArray(educationSkills);
+    const normalizedEducationSpecialties = toStringArray(educationSpecialties);
+    const normalizedConstructionAreas = normalizeSlugArray(requestedConstructionAreas);
+    const normalizedConstructionServices = normalizeSlugArray(requestedConstructionServices);
     const educationLists = [
-      educationCategories,
-      educationLanguages,
-      educationSkills,
-      educationSpecialties
-    ].filter((items) => Array.isArray(items) && items.length > 0);
+      normalizedEducationCategories,
+      normalizedEducationLanguages,
+      normalizedEducationSkills,
+      normalizedEducationSpecialties
+    ].filter((items) => items.length > 0);
 
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: "User not found" });
@@ -63,25 +174,25 @@ export const becomeAgent = async (req: Request, res: Response) => {
     const existing = await AgentProfile.findOne({ user: user._id });
     if (existing) return res.status(400).json({ message: "Agent profile already exists" });
 
-    if (serviceCategory === "taxi" && taxi?.seatCapacity && !allowedSeatCapacities.includes(Number(taxi.seatCapacity))) {
+    if (
+      normalizedServiceCategory === "taxi" &&
+      taxi?.seatCapacity &&
+      !allowedSeatCapacities.includes(Number(taxi.seatCapacity))
+    ) {
       return res.status(400).json({ message: "Seat capacity not allowed" });
     }
-    if (serviceCategory === "education" && educationLists.length === 0) {
+    if (normalizedServiceCategory === "education" && educationLists.length === 0) {
       return res.status(400).json({ message: "Education agent must choose at least one category" });
     }
-    if (serviceCategory === "construction") {
-      if (!Array.isArray(requestedConstructionServices) || requestedConstructionServices.length === 0) {
+    if (normalizedServiceCategory === "construction") {
+      if (normalizedConstructionServices.length === 0) {
         return res.status(400).json({ message: "Construction agent must choose at least one service" });
       }
-      const invalidArea = Array.isArray(requestedConstructionAreas)
-        ? requestedConstructionAreas.find((area) => !constructionAreas.includes(area))
-        : undefined;
+      const invalidArea = normalizedConstructionAreas.find((area) => !constructionAreas.includes(area));
       if (invalidArea) {
         return res.status(400).json({ message: "Invalid construction area" });
       }
-      const invalidService = requestedConstructionServices.find(
-        (service: string) => !constructionServices.includes(service)
-      );
+      const invalidService = normalizedConstructionServices.find((service) => !constructionServices.includes(service));
       if (invalidService) {
         return res.status(400).json({ message: "Invalid construction service" });
       }
@@ -89,19 +200,19 @@ export const becomeAgent = async (req: Request, res: Response) => {
 
     const profile = await AgentProfile.create({
       user: user._id,
-      kind,
-      socialServices: socialServices ?? [],
-      materialServices: materialServices ?? [],
-      serviceCategory,
-      constructionAreas: requestedConstructionAreas ?? [],
-      constructionServices: requestedConstructionServices ?? [],
-      serviceOfficeAddress,
-      serviceQualification,
+      kind: normalizedKind,
+      socialServices: normalizedSocialServices,
+      materialServices: normalizedMaterialServices,
+      serviceCategory: normalizedServiceCategory,
+      constructionAreas: normalizedConstructionAreas,
+      constructionServices: normalizedConstructionServices,
+      serviceOfficeAddress: typeof serviceOfficeAddress === "string" ? serviceOfficeAddress.trim() : undefined,
+      serviceQualification: typeof serviceQualification === "string" ? serviceQualification.trim() : undefined,
       taxi: taxi ?? undefined,
-      educationCategories: educationCategories ?? [],
-      educationLanguages: educationLanguages ?? [],
-      educationSkills: educationSkills ?? [],
-      educationSpecialties: educationSpecialties ?? []
+      educationCategories: normalizedEducationCategories,
+      educationLanguages: normalizedEducationLanguages,
+      educationSkills: normalizedEducationSkills,
+      educationSpecialties: normalizedEducationSpecialties
     });
 
     user.role = "AGENT";
@@ -110,6 +221,117 @@ export const becomeAgent = async (req: Request, res: Response) => {
     return res.status(201).json({ profile });
   } catch (err) {
     console.error("becomeAgent error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const updateMyAgentType = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+
+    const profile = await AgentProfile.findOne({ user: req.user._id });
+    if (!profile) {
+      return res.status(404).json({ message: "Agent profile not found" });
+    }
+
+    const payload = req.body ?? {};
+    const hasOwn = (key: string) => Object.prototype.hasOwnProperty.call(payload, key);
+
+    const nextServiceCategory = hasOwn("serviceCategory")
+      ? normalizeServiceCategory(payload.serviceCategory)
+      : profile.serviceCategory;
+
+    const resolvedKind = hasOwn("kind")
+      ? normalizeKind(payload.kind, nextServiceCategory)
+      : normalizeKind(profile.kind, nextServiceCategory);
+
+    if (!resolvedKind) {
+      return res.status(400).json({ message: "Invalid kind. Use SELLER or SERVICE" });
+    }
+
+    const nextSocialServices = hasOwn("socialServices")
+      ? toStringArray(payload.socialServices)
+      : profile.socialServices ?? [];
+    const nextMaterialServices = hasOwn("materialServices")
+      ? toStringArray(payload.materialServices)
+      : profile.materialServices ?? [];
+    const nextEducationCategories = hasOwn("educationCategories")
+      ? toStringArray(payload.educationCategories)
+      : profile.educationCategories ?? [];
+    const nextEducationLanguages = hasOwn("educationLanguages")
+      ? toStringArray(payload.educationLanguages)
+      : profile.educationLanguages ?? [];
+    const nextEducationSkills = hasOwn("educationSkills")
+      ? toStringArray(payload.educationSkills)
+      : profile.educationSkills ?? [];
+    const nextEducationSpecialties = hasOwn("educationSpecialties")
+      ? toStringArray(payload.educationSpecialties)
+      : profile.educationSpecialties ?? [];
+    const nextConstructionAreas = hasOwn("constructionAreas")
+      ? normalizeSlugArray(payload.constructionAreas)
+      : profile.constructionAreas ?? [];
+    const nextConstructionServices = hasOwn("constructionServices")
+      ? normalizeSlugArray(payload.constructionServices)
+      : profile.constructionServices ?? [];
+
+    const nextTaxi = hasOwn("taxi") ? payload.taxi : profile.taxi;
+    if (nextServiceCategory === "taxi" && nextTaxi?.seatCapacity && !allowedSeatCapacities.includes(Number(nextTaxi.seatCapacity))) {
+      return res.status(400).json({ message: "Seat capacity not allowed" });
+    }
+
+    const educationLists = [
+      nextEducationCategories,
+      nextEducationLanguages,
+      nextEducationSkills,
+      nextEducationSpecialties
+    ].filter((items) => items.length > 0);
+    if (nextServiceCategory === "education" && educationLists.length === 0) {
+      return res.status(400).json({ message: "Education agent must choose at least one category" });
+    }
+
+    if (nextServiceCategory === "construction") {
+      if (nextConstructionServices.length === 0) {
+        return res.status(400).json({ message: "Construction agent must choose at least one service" });
+      }
+      const invalidArea = nextConstructionAreas.find((area) => !constructionAreas.includes(area));
+      if (invalidArea) {
+        return res.status(400).json({ message: "Invalid construction area" });
+      }
+      const invalidService = nextConstructionServices.find((service) => !constructionServices.includes(service));
+      if (invalidService) {
+        return res.status(400).json({ message: "Invalid construction service" });
+      }
+    }
+
+    profile.kind = resolvedKind;
+    profile.serviceCategory = nextServiceCategory;
+    profile.socialServices = nextSocialServices;
+    profile.materialServices = nextMaterialServices;
+    profile.educationCategories = nextEducationCategories;
+    profile.educationLanguages = nextEducationLanguages;
+    profile.educationSkills = nextEducationSkills;
+    profile.educationSpecialties = nextEducationSpecialties;
+    profile.constructionAreas = nextConstructionAreas;
+    profile.constructionServices = nextConstructionServices;
+
+    if (hasOwn("serviceOfficeAddress")) {
+      profile.serviceOfficeAddress =
+        typeof payload.serviceOfficeAddress === "string" ? payload.serviceOfficeAddress.trim() : undefined;
+    }
+    if (hasOwn("serviceQualification")) {
+      profile.serviceQualification =
+        typeof payload.serviceQualification === "string" ? payload.serviceQualification.trim() : undefined;
+    }
+    if (hasOwn("taxi")) {
+      profile.taxi = payload.taxi ?? undefined;
+    }
+
+    await profile.save();
+    await User.updateOne({ _id: req.user._id }, { $set: { role: "AGENT" } });
+
+    return res.json({ profile });
+  } catch (err) {
+    console.error("updateMyAgentType error", err);
     return res.status(500).json({ message: "Server error" });
   }
 };

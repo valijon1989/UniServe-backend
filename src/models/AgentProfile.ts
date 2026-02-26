@@ -18,7 +18,7 @@ export interface IAgentProfile extends Document {
   gender?: "male" | "female" | "other";
   phone?: string;
   telegram?: string;
-  serviceCategory?: "language" | "translation" | "consulting" | "legal" | "delivery" | "taxi" | "repair" | "education" | "construction";
+  serviceCategory?: string;
   educationCategories?: string[];
   educationLanguages?: string[];
   educationSkills?: string[];
@@ -59,18 +59,19 @@ const AgentProfileSchema = new Schema<IAgentProfile>(
     gender: { type: String, enum: ["male", "female", "other"] },
     phone: { type: String },
     telegram: { type: String },
-  serviceCategory: {
-    type: String,
-    enum: ["language", "translation", "consulting", "legal", "delivery", "taxi", "repair", "education", "construction"]
-  },
-  educationCategories: [{ type: String }],
-  educationLanguages: [{ type: String }],
-  educationSkills: [{ type: String }],
-  educationSpecialties: [{ type: String }],
-  constructionAreas: [{ type: String }],
-  constructionServices: [{ type: String }],
-  serviceOfficeAddress: { type: String },
-  serviceQualification: { type: String },
+    serviceCategory: {
+      type: String,
+      trim: true,
+      lowercase: true
+    },
+    educationCategories: [{ type: String }],
+    educationLanguages: [{ type: String }],
+    educationSkills: [{ type: String }],
+    educationSpecialties: [{ type: String }],
+    constructionAreas: [{ type: String }],
+    constructionServices: [{ type: String }],
+    serviceOfficeAddress: { type: String },
+    serviceQualification: { type: String },
     taxi: {
       vehicleModel: { type: String },
       seatCapacity: { type: Number },

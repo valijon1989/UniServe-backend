@@ -1,5 +1,13 @@
 import mongoose, { Schema, Document } from "mongoose";
 
+export interface IPostMedia {
+  url: string;
+  type: "image" | "video";
+  width?: number;
+  height?: number;
+  duration?: number;
+}
+
 export interface IComment {
   user: mongoose.Types.ObjectId;
   text: string;
@@ -12,15 +20,18 @@ export interface IComment {
 
 export interface IPost extends Document {
   author: mongoose.Types.ObjectId;
+  authorId?: mongoose.Types.ObjectId;
   title: string;
-  slug: string;
+  slug?: string;
   excerpt?: string;
   content?: string;
   text?: string;
+  media: IPostMedia[];
   images: string[];
   videoUrl?: string;
   category: string;
   type: string;
+  linkUrl?: string;
   location?: string;
   language?: string;
   sourceUrl?: string;
@@ -30,6 +41,10 @@ export interface IPost extends Document {
   status: "active" | "blocked" | "pending";
   views: number;
   likes: mongoose.Types.ObjectId[];
+  likeCount: number;
+  dislikeCount: number;
+  commentCount: number;
+  shareCount: number;
   reports: number;
   bestAnswerId?: mongoose.Types.ObjectId;
   comments: IComment[];
@@ -53,15 +68,26 @@ const CommentSchema = new Schema<IComment>(
 const PostSchema = new Schema<IPost>(
   {
     author: { type: Schema.Types.ObjectId, ref: "User", required: true },
-    title: { type: String, required: true },
-    slug: { type: String, required: true, unique: true },
+    authorId: { type: Schema.Types.ObjectId, ref: "User" },
+    title: { type: String, default: "" },
+    slug: { type: String, unique: true, sparse: true },
     excerpt: { type: String, default: "" },
     content: { type: String, default: "" },
     text: { type: String, default: "" },
+    media: [
+      {
+        url: { type: String, required: true },
+        type: { type: String, enum: ["image", "video"], required: true },
+        width: { type: Number },
+        height: { type: Number },
+        duration: { type: Number }
+      }
+    ],
     images: [{ type: String }],
     videoUrl: { type: String },
-    category: { type: String, default: "community" },
-    type: { type: String, default: "question" },
+    category: { type: String, default: "social" },
+    type: { type: String, default: "social" },
+    linkUrl: { type: String },
     location: { type: String },
     language: { type: String, default: "Uzbek" },
     sourceUrl: { type: String },
@@ -71,6 +97,10 @@ const PostSchema = new Schema<IPost>(
     status: { type: String, enum: ["active", "blocked", "pending"], default: "active" },
     views: { type: Number, default: 0 },
     likes: [{ type: Schema.Types.ObjectId, ref: "User" }],
+    likeCount: { type: Number, default: 0 },
+    dislikeCount: { type: Number, default: 0 },
+    commentCount: { type: Number, default: 0 },
+    shareCount: { type: Number, default: 0 },
     reports: { type: Number, default: 0 },
     bestAnswerId: { type: Schema.Types.ObjectId },
     comments: [CommentSchema],
@@ -87,5 +117,16 @@ const PostSchema = new Schema<IPost>(
 
 PostSchema.index({ slug: 1 });
 PostSchema.index({ category: 1, type: 1, isFeatured: 1 });
+PostSchema.index({ type: 1, createdAt: 1 });
+
+PostSchema.pre("validate", function (next) {
+  if (!this.authorId && this.author) {
+    this.authorId = this.author;
+  }
+  if (!this.author && this.authorId) {
+    this.author = this.authorId;
+  }
+  next();
+});
 
 export const Post = mongoose.model<IPost>("Post", PostSchema);

@@ -1,6 +1,6 @@
 import { Server as HttpServer } from "http";
 import WebSocket, { WebSocketServer } from "ws";
-import { verifyToken } from "./jwt";
+import { verifyAccessToken } from "./jwt";
 
 type WsPayload = Record<string, unknown>;
 
@@ -49,7 +49,7 @@ export function initWebsocket(server: HttpServer) {
 
     let userId: string | null = null;
     try {
-      const payload = verifyToken(token);
+      const payload = verifyAccessToken(token);
       userId = payload._id;
     } catch {
       socket.close(4002, "Invalid token");

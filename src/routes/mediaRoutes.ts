@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { authRequired } from "../middlewares/auth";
 import { createMediaRoom, createMediaToken, getGeneratedAvatar } from "../controllers/mediaController";
+import { t } from "../i18n";
+import { respondServerError } from "../utils/controllerResponses";
 
 type CacheEntry = {
   expiresAt: number;
@@ -35,13 +37,13 @@ router.get("/:category", authRequired, async (req, res) => {
   try {
     const apiKey = process.env.PEXELS_API_KEY;
     if (!apiKey) {
-      return res.status(500).json({ error: "Pexels API key missing" });
+      return res.status(500).json({ error: t(req, "media.config.api_key_missing.error") });
     }
 
     const category = String(req.params.category || "").toLowerCase();
     const query = queries[category];
     if (!query) {
-      return res.status(404).json({ error: "Unknown media category" });
+      return res.status(404).json({ error: t(req, "media.lookup.category_not_found.error") });
     }
 
     const ip = req.ip || "unknown";
@@ -50,7 +52,7 @@ router.get("/:category", authRequired, async (req, res) => {
     if (!bucket || bucket.resetAt <= now) {
       rateBucket.set(ip, { count: 1, resetAt: now + rateWindowMs });
     } else if (bucket.count >= rateMax) {
-      return res.status(429).json({ error: "Too many requests" });
+      return res.status(429).json({ error: t(req, "media.rate_limit.exceeded.error") });
     } else {
       bucket.count += 1;
     }
@@ -73,14 +75,14 @@ router.get("/:category", authRequired, async (req, res) => {
     );
 
     if (!response.ok) {
-      return res.status(502).json({ error: "Pexels API error" });
+      return res.status(502).json({ error: t(req, "media.upstream.pexels.error") });
     }
 
     const data = await response.json();
     cache.set(cacheKey, { expiresAt: now + cacheTtlMs, data });
     return res.json(data);
   } catch (err) {
-    return res.status(500).json({ error: "Pexels API error" });
+    return respondServerError(req, res, "error");
   }
 });
 

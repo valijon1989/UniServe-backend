@@ -4,8 +4,10 @@
   "description": "UniServe marketplace & social platform backend (TypeScript, Express, MongoDB)",
   "main": "dist/server.js",
   "scripts": {
-    "start": "ts-node src/server.ts",
-    "dev": "nodemon --exec ts-node src/server.ts",
+    "start": "node scripts/runServerWithPortCleanup.js start",
+    "dev": "node scripts/runServerWithPortCleanup.js dev",
+    "start:clean": "node scripts/runServerWithPortCleanup.js start --force-clean",
+    "port:5001:kill": "node scripts/killPort.js 5001",
     "backfill:cover-image-url": "ts-node scripts/backfillCoverImageUrl.ts",
     "fix:duplicate-slugs": "ts-node scripts/fixDuplicateSlugs.ts",
     "migrate:news-posts": "ts-node scripts/migrateNewsPostsToPosts.ts",

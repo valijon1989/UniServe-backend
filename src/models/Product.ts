@@ -25,6 +25,9 @@ export interface IProduct extends Document {
   likes?: number;
   views?: number;
   orders?: number;
+  likeCount?: number;
+  viewCount?: number;
+  purchaseCount?: number;
   likes_7d?: number;
   views_7d?: number;
   orders_7d?: number;
@@ -57,6 +60,9 @@ const ProductSchema = new Schema<IProduct>(
     likes: { type: Number, default: 0 },
     views: { type: Number, default: 0 },
     orders: { type: Number, default: 0 },
+    likeCount: { type: Number, default: 0 },
+    viewCount: { type: Number, default: 0 },
+    purchaseCount: { type: Number, default: 0 },
     likes_7d: { type: Number, default: 0 },
     views_7d: { type: Number, default: 0 },
     orders_7d: { type: Number, default: 0 },

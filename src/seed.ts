@@ -33,10 +33,16 @@ export async function seedIfEmpty() {
     name: "UniServe Admin",
     username: "uniserve_admin",
     role: "ADMIN",
+    isAdmin: true,
+    adminAccessStatus: "APPROVED",
+    adminLevel: "PRIMARY",
+    adminApprovedAt: new Date(),
     isVerified: true,
     isPrivate: false,
     avatarUrl: "/static/avatars/admin.jpg",
-    bio: "Global UniServe administrator"
+    bio: "Global UniServe administrator",
+    mfaEnabled: false,
+    mfaMethods: []
   });
 
   const hashUser = await bcrypt.hash("User123!", 10);

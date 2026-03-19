@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose";
 
-export type EducationCategory = "language" | "skill" | "special";
+export type EducationCategory = string;
 export type EducationFormat = "online" | "offline";
 export type EducationDurationUnit = "days" | "weeks" | "months";
 
@@ -40,7 +40,7 @@ const EducationListingSchema = new Schema<IEducationListing>(
   {
     agentId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     title: { type: String, required: true },
-    category: { type: String, enum: ["language", "skill", "special"], required: true },
+    category: { type: String, required: true, trim: true, index: true },
     subcategory: { type: String, required: true },
     description: { type: String, required: true },
     weeklyHours: { type: Number },

@@ -15,6 +15,11 @@ const SECRET_USER_FIELDS = new Set([
   "emailVerificationCode",
   "twoFactorSecret",
   "twoFactorRecoveryCodes",
+  "mfaTotpSecret",
+  "mfaPendingSecret",
+  "mfaRecoveryCodeHashes",
+  "mfaEmailOtpHash",
+  "mfaEmailOtpExpiresAt",
   "__v"
 ]);
 

@@ -4,6 +4,7 @@ import { AgentProfile } from "../models/AgentProfile";
 import { User } from "../models/User";
 import { ConstructionListing } from "../models/ConstructionListing";
 import { parsePositiveInt } from "../utils/pagination";
+import { respondAuthRequired } from "../utils/controllerResponses";
 
 const constructionCategories = [
   {
@@ -62,7 +63,7 @@ export const getConstructionCategories = async (_req: Request, res: Response) =>
 
 export const createConstructionListing = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const profile = await AgentProfile.findOne({ user: req.user._id });
     if (!profile || profile.serviceCategory !== "construction") {
       return res.status(403).json({ message: "Only construction agents can create listings" });
@@ -205,7 +206,7 @@ export const getConstructionListingDetail = async (req: Request, res: Response) 
 
 export const myConstructionListings = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const listings = await ConstructionListing.find({ agentId: req.user._id }).sort({ createdAt: -1 });
     return res.json({ listings });
   } catch (err) {
@@ -216,7 +217,7 @@ export const myConstructionListings = async (req: Request, res: Response) => {
 
 export const updateConstructionListing = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const { id } = req.params;
     if (!isValidObjectId(id)) return res.status(400).json({ message: "Invalid listing id" });
     const listing = await ConstructionListing.findById(id);

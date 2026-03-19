@@ -2,7 +2,6 @@ import { Request, Response } from "express";
 import { Product } from "../models/Product";
 import { parsePositiveInt } from "../utils/pagination";
 import mongoose from "mongoose";
-import dayjs from "dayjs";
 import path from "path";
 import { ensureAbsoluteUrl } from "../utils/imageHelpers";
 import { slugify } from "../utils/slug";
@@ -14,6 +13,27 @@ import {
   sanitizeImageArray
 } from "../utils/resolveCoverImage";
 import { resolveSaleMeta } from "../services/listingSelector";
+import { findProductByIdentifier } from "../services/productLookup";
+import { buildCategoryMeta, normalizeMarketplaceCategory } from "../services/categoryTaxonomy";
+import { buildRecommendationModulesSafe, recordRecommendationSignal } from "../services/recommendationEngine";
+import { buildListingUiMeta } from "../services/sharedFilters";
+import {
+  formatLocaleDateRange,
+  getProductCopy,
+  interpolateTemplate,
+  localizeKeywordList,
+  localizeKeyword,
+  resolveLocalizedArrayField,
+  resolveLocalizedTextField
+} from "../services/localizedContent";
+import { respondAuthRequired } from "../utils/controllerResponses";
+import {
+  buildProductCardContext,
+  buildProductListingPipeline,
+  createProductListingQueryState,
+  serializeProductCard,
+  serializeProductCards
+} from "../services/productCard";
 
 type DeliveryInfo = {
   type: string;
@@ -35,9 +55,6 @@ type SellerInfo = {
   badges: string[];
 };
 
-const formatDateRange = (fromDays = 1, toDays = 2) =>
-  `${dayjs().add(fromDays, "day").format("MMM D")} - ${dayjs().add(toDays, "day").format("MMM D")}`;
-
 const DUPLICATE_GUARD_WINDOW_MS = Number(process.env.DUPLICATE_GUARD_WINDOW_MS || 15_000);
 const PRODUCT_FALLBACK = ensureAbsoluteUrl("/images/fallback-product.png") || "http://localhost:5001/images/fallback-product.png";
 
@@ -48,62 +65,82 @@ const defaultSeller: SellerInfo = {
   sales: 3200,
   contact: "+998 71 123 45 67",
   isOfficial: true,
-  badges: ["Rasmiy diler", "Original mahsulot", "24/7 qo'llab-quvvatlash"]
+  badges: []
 };
 
-const buildBadges = (p: any) =>
-  p.badges || ["Tez yetkazib berish", "Original mahsulot", "15 kun qaytarish", "Qadoqlashni videoga olish"];
+const buildBadges = (p: any, locale?: Request["locale"]) => {
+  const copy = getProductCopy(locale);
+  const localized = resolveLocalizedArrayField(p, "badges", locale, []);
+  if (localized.length) return localized;
+  const rawBadges = Array.isArray(p.badges) ? p.badges.filter(Boolean) : [];
+  if (rawBadges.length) return localizeKeywordList(rawBadges, locale);
+  return [...copy.defaultBadges, copy.packagingBadge];
+};
 
-const buildDeliveryInfo = (p: any): DeliveryInfo => {
-  const estimated = p.delivery?.estimated || formatDateRange(1, 2);
+const buildDeliveryInfo = (p: any, locale?: Request["locale"]): DeliveryInfo => {
+  const copy = getProductCopy(locale);
+  const estimated = p.delivery?.estimated || formatLocaleDateRange(locale, 1, 2);
   return {
     type: p.delivery?.type || "fast",
     fee: p.delivery?.fee ?? 0,
     estimated,
-    promise: p.delivery?.promise || "Buyurtma 18:00 gacha tasdiqlansa ertangi kuni yetkaziladi",
-    origin: p.delivery?.origin || "Toshkent ombori",
+    promise: resolveLocalizedTextField(p.delivery, "promise", locale, p.delivery?.promise || copy.deliveryPromise),
+    origin: resolveLocalizedTextField(p.delivery, "origin", locale, p.delivery?.origin || copy.origin),
     freeReturn: p.delivery?.freeReturn ?? true,
     address: p.delivery?.address
   };
 };
 
-const buildSellerInfo = (p: any): SellerInfo => {
+const buildSellerInfo = (p: any, locale?: Request["locale"]): SellerInfo => {
+  const copy = getProductCopy(locale);
   const seller = p.seller || {};
   return {
-    name: seller.name || p.vendor?.name || "UniServe Market",
+    name: resolveLocalizedTextField(seller, "name", locale, seller.name || p.vendor?.name || copy.sellerName),
     rating: seller.rating ?? p.rating?.avg ?? defaultSeller.rating,
     reviewCount: seller.reviewCount ?? p.rating?.count ?? defaultSeller.reviewCount,
     sales: seller.sales ?? p.stats?.purchases ?? defaultSeller.sales,
     contact: seller.contact || defaultSeller.contact,
     isOfficial: seller.isOfficial ?? defaultSeller.isOfficial,
-    badges: seller.badges || defaultSeller.badges
+    badges: localizeKeywordList(resolveLocalizedArrayField(seller, "badges", locale, seller.badges || defaultSeller.badges), locale)
   };
 };
 
-const buildBenefits = (p: any, delivery: DeliveryInfo) => ({
+const buildBenefits = (p: any, delivery: DeliveryInfo, locale?: Request["locale"]) => {
+  const copy = getProductCopy(locale);
+  return {
   coupons:
     p.benefits?.coupons ||
     [
-      { label: "5% kupon", description: "Checkout jarayonida avtomatik qo'llanadi" },
-      { label: "10 000 so'm bonus", description: "Yangi foydalanuvchilar uchun" }
+      { label: copy.couponLabel, description: copy.couponDescription },
+      { label: copy.bonusLabel, description: copy.bonusDescription }
     ],
   installment:
-    p.benefits?.installment || { months: [3, 6, 12], partner: "Paymart", minPrice: 100000 },
-  delivery: p.benefits?.delivery || (delivery.fee === 0 ? "Yetkazib berish bepul" : "Tez yetkazish xizmati mavjud")
-});
+    p.benefits?.installment || { months: [3, 6, 12], partner: copy.installmentPartner, minPrice: 100000 },
+  delivery: resolveLocalizedTextField(
+    p.benefits,
+    "delivery",
+    locale,
+    p.benefits?.delivery || (delivery.fee === 0 ? copy.freeDelivery : copy.paidDelivery)
+  )
+};
+};
 
-const buildPolicies = (p: any) => ({
-  returnWindow: p.policies?.returnWindow || "15 kun ichida bepul qaytarish",
-  exchange: p.policies?.exchange || "Oson almashtirish va pulni qaytarish",
-  warranty: p.policies?.warranty || "12 oy ishlab chiqaruvchi kafolati",
-  support: p.policies?.support || "24/7 qo'llab-quvvatlash"
-});
+const buildPolicies = (p: any, locale?: Request["locale"]) => {
+  const copy = getProductCopy(locale);
+  return {
+    returnWindow: resolveLocalizedTextField(p.policies, "returnWindow", locale, p.policies?.returnWindow || copy.returnWindow),
+    exchange: resolveLocalizedTextField(p.policies, "exchange", locale, p.policies?.exchange || copy.exchange),
+    warranty: resolveLocalizedTextField(p.policies, "warranty", locale, p.policies?.warranty || copy.warranty),
+    support: resolveLocalizedTextField(p.policies, "support", locale, p.policies?.support || copy.support)
+  };
+};
 
-const buildSpecs = (p: any) => {
+const buildSpecs = (p: any, locale?: Request["locale"]) => {
+  const copy = getProductCopy(locale);
   const baseSpecs = [
-    { label: "Kategoriya", value: p.category || "Umumiy" },
-    { label: "Brend", value: p.brand || "UniServe tanlovi" },
-    { label: "Holati", value: p.condition || "Yangi" }
+    { label: copy.specCategory, value: buildCategoryMeta(p.category, locale, "products")?.displayName || p.category || copy.genericCategory },
+    { label: copy.specBrand, value: p.brand || copy.selectedBrand },
+    { label: copy.specCondition, value: p.condition || copy.conditionNew }
   ];
   const merged = [...baseSpecs, ...(p.specs || [])];
   const seen = new Set<string>();
@@ -116,18 +153,26 @@ const buildSpecs = (p: any) => {
   });
 };
 
-const buildOptions = (p: any) =>
-  p.options || [
-    { name: "Rangi", values: ["Oq", "Qora"], defaultValue: "Oq" },
-    { name: "O'lcham", values: ["S", "M", "L"], defaultValue: "M" }
-  ];
+const buildOptions = (p: any, locale?: Request["locale"]) => {
+  const copy = getProductCopy(locale);
+  return (
+    p.options || [
+      { name: copy.colorName, values: [copy.white, copy.black], defaultValue: copy.white },
+      { name: copy.sizeName, values: ["S", "M", "L"], defaultValue: "M" }
+    ]
+  );
+};
 
-const buildHighlights = (name: string, delivery: DeliveryInfo, seller: SellerInfo, p: any) =>
-  p.highlights || [
-    `${name} uchun tez yetkazib berish (${delivery.estimated})`,
-    `${seller.name} tomonidan kafolatlangan original mahsulot`,
-    p.price ? `Hozirgi narx: ${p.price} so'm` : "Narx aniqlandi"
+const buildHighlights = (name: string, delivery: DeliveryInfo, seller: SellerInfo, p: any, locale?: Request["locale"]) => {
+  const copy = getProductCopy(locale);
+  const localized = resolveLocalizedArrayField(p, "highlights", locale, []);
+  if (localized.length) return localized;
+  return [
+    interpolateTemplate(copy.highlightDelivery, { name, estimated: delivery.estimated }),
+    interpolateTemplate(copy.highlightOriginal, { seller: seller.name }),
+    p.price ? interpolateTemplate(copy.highlightPrice, { price: `${p.price} ${p.currency || "UZS"}` }) : copy.highlightPricePending
   ];
+};
 
 const buildReviewSummary = (p: any) => {
   const avg = Number(p.rating?.avg || 0);
@@ -144,23 +189,42 @@ const buildDetailSections = (
   specs: { label: string; value: string }[],
   delivery: DeliveryInfo,
   seller: SellerInfo,
-  policies: { returnWindow: string; exchange: string; warranty: string; support: string }
-) => [
-  { title: "Asosiy ma'lumotlar", items: highlights },
-  { title: "Texnik xarakteristikalar", items: specs.map((s) => `${s.label}: ${s.value}`) },
-  { title: "Yetkazib berish", items: [`Xizmat: ${delivery.type}`, `Narx: ${delivery.fee ? `${delivery.fee} so'm` : "Bepul"}`, `Taxminiy sana: ${delivery.estimated}`, delivery.promise] },
+  policies: { returnWindow: string; exchange: string; warranty: string; support: string },
+  locale?: Request["locale"]
+) => {
+  const copy = getProductCopy(locale);
+  return [
+  { title: copy.sectionOverview, items: highlights },
+  { title: copy.sectionSpecs, items: specs.map((s) => `${s.label}: ${s.value}`) },
   {
-    title: "Sotuvchi",
-    items: [`Sotuvchi: ${seller.name}`, `Reyting: ${seller.rating} (${seller.reviewCount} izoh)`, `Sotuvlar: ${seller.sales}`, `Kontakt: ${seller.contact}`]
+    title: copy.sectionDelivery,
+    items: [
+      `${copy.deliveryServiceLabel}: ${localizeKeyword(delivery.type, locale)}`,
+      `${copy.deliveryPriceLabel}: ${delivery.fee ? `${delivery.fee} UZS` : copy.freeDelivery}`,
+      `${copy.deliveryDateLabel}: ${delivery.estimated}`,
+      delivery.promise
+    ]
   },
-  { title: "Qaytarish va kafolat", items: [policies.returnWindow, policies.exchange, policies.warranty, policies.support] }
+  {
+    title: copy.sectionSeller,
+    items: [
+      `${copy.sellerLabel}: ${seller.name}`,
+      `${copy.sellerRatingLabel}: ${seller.rating} (${seller.reviewCount})`,
+      `${copy.sellerSalesLabel}: ${seller.sales}`,
+      `${copy.sellerContactLabel}: ${seller.contact}`
+    ]
+  },
+  { title: copy.sectionPolicies, items: [policies.returnWindow, policies.exchange, policies.warranty, policies.support] }
 ];
+};
 
 const normalizeImages = (p: any): string[] => {
   return sanitizeImageArray(p?.images);
 };
 
 const normalizeText = (value: unknown): string => String(value || "").trim().toLowerCase();
+const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const toAppLocale = (locale?: Request["locale"]) => (locale === "en" || locale === "ru" || locale === "ko" ? locale : "uz");
 
 const buildUniqueProductSlug = async (title: string) => {
   const base = slugify(title) || "product";
@@ -267,15 +331,15 @@ const findProductByLegacyIdentifier = async (identifier: string) => {
     .populate("createdBy", "name username role avatarUrl");
 };
 
-export const toDetailDto = (p: any) => {
-  const name = p.name || p.title;
+export const toDetailDto = (p: any, locale?: Request["locale"]) => {
+  const name = resolveLocalizedTextField(p, "title", locale, p.name || p.title || "");
   const price = Number(p.price || 0);
   const oldPrice = p.oldPrice ?? (price ? Math.round(price * 1.12) : undefined);
   const rating = p.rating || { avg: 0, count: 0 };
   const ratingCount = Number(p.ratingCount ?? rating.count ?? 0);
-  const likes = Number(p?.stats?.likes ?? p.likes ?? 0);
-  const views = Number(p?.stats?.views ?? p.views ?? 0);
-  const orders = Number(p?.stats?.orders ?? p?.stats?.purchases ?? p.orders ?? p.purchases ?? 0);
+  const likes = Number(p?.likeCount ?? p?.stats?.likes ?? p.likes ?? 0);
+  const views = Number(p?.viewCount ?? p?.stats?.views ?? p.views ?? 0);
+  const orders = Number(p?.purchaseCount ?? p?.stats?.orders ?? p?.stats?.purchases ?? p.orders ?? p.purchases ?? 0);
   const stats = { views, likes, orders, purchases: orders };
   const saleMeta = resolveSaleMeta({
     basePrice: price,
@@ -283,23 +347,25 @@ export const toDetailDto = (p: any) => {
     discountPercent: p.discountPercent,
     oldPrice: p.oldPrice
   });
-  const delivery = buildDeliveryInfo(p);
-  const seller = buildSellerInfo(p);
-  const badges = buildBadges(p);
-  const benefits = buildBenefits(p, delivery);
-  const specs = buildSpecs(p);
-  const highlights = buildHighlights(name, delivery, seller, p);
-  const policies = buildPolicies(p);
-  const options = buildOptions(p);
-  const detailSections = buildDetailSections(highlights, specs, delivery, seller, policies);
+  const delivery = buildDeliveryInfo(p, locale);
+  const seller = buildSellerInfo(p, locale);
+  const badges = buildBadges(p, locale);
+  const benefits = buildBenefits(p, delivery, locale);
+  const specs = buildSpecs(p, locale);
+  const highlights = buildHighlights(name, delivery, seller, p, locale);
+  const policies = buildPolicies(p, locale);
+  const options = buildOptions(p, locale);
+  const detailSections = buildDetailSections(highlights, specs, delivery, seller, policies, locale);
   const reviewSummary = buildReviewSummary(p);
   const images = normalizeImages(p);
   const coverImageUrl = resolveCoverImage(p);
+  const primaryImage = coverImageUrl || images[0] || PRODUCT_FALLBACK;
+  const gallery = Array.from(new Set([primaryImage, ...images].filter(Boolean)));
   const creator = p?.createdBy && typeof p.createdBy === "object" ? p.createdBy : null;
   const agent = creator
     ? {
         id: creator._id?.toString?.() || String(creator._id || ""),
-        name: creator.name || seller.name || "UniServe Agent",
+        name: creator.name || seller.name || getProductCopy(locale).sellerName,
         avatarUrl: creator.avatarUrl || null,
         rating: Number(seller.rating || 0)
       }
@@ -308,15 +374,55 @@ export const toDetailDto = (p: any) => {
   const discountPercent = saleMeta.discountPercent ?? 0;
   const isOnSale = saleMeta.isSale;
   const originalPrice = saleMeta.originalPrice ?? oldPrice ?? (Number.isFinite(price) ? price : null);
+  const categoryMeta = buildCategoryMeta(p.category, locale, "products");
+  const stockCount = Number(p.stock ?? p.quantity ?? 24) || 0;
+  const shippingInfo = {
+    deliveryType: delivery.type,
+    deliveryLabel: localizeKeyword(delivery.type, locale),
+    estimated: delivery.estimated,
+    promise: delivery.promise,
+    origin: delivery.origin,
+    fee: Number(delivery.fee || 0),
+    freeDelivery: Number(delivery.fee || 0) === 0,
+    freeReturn: Boolean(delivery.freeReturn),
+    fastShipping: String(delivery.type || "").toLowerCase() === "fast"
+  };
+  const returnPolicy = {
+    summary: policies.returnWindow,
+    exchange: policies.exchange,
+    warranty: policies.warranty,
+    support: policies.support
+  };
+  const sellerSummary = {
+    id: agent?.id || creator?._id?.toString?.() || String(creator?._id || ""),
+    name: seller.name,
+    avatarUrl: agent?.avatarUrl || creator?.avatarUrl || null,
+    rating: Number(seller.rating || 0),
+    reviewCount: Number(seller.reviewCount || 0),
+    verified: Boolean(seller.isOfficial),
+    contact: seller.contact || null,
+    location: p.vendor?.location || null
+  };
+  const card = serializeProductCard(p, toAppLocale(locale));
+  const shortDescription = resolveLocalizedTextField(
+    p,
+    "shortDescription",
+    locale,
+    resolveLocalizedTextField(p, "summary", locale, p.summary || p.description || "")
+  );
 
   return {
     _id: p._id?.toString?.() ?? p.id ?? p.slug,
     id: p._id?.toString?.() ?? p.slug ?? p.id,
+    slug: p.slug || null,
     type: "product",
     title: name,
     name,
-    description: p.description || "",
+    description: resolveLocalizedTextField(p, "description", locale, p.description || ""),
+    shortDescription,
+    fullDescription: resolveLocalizedTextField(p, "description", locale, p.description || ""),
     price,
+    currentPrice: salePrice ?? price,
     salePrice,
     originalPrice,
     discountPercent,
@@ -324,25 +430,38 @@ export const toDetailDto = (p: any) => {
     isSale: isOnSale,
     currency: p.currency || "UZS",
     oldPrice: originalPrice,
-    thumbnail: coverImageUrl,
-    image: coverImageUrl,
-    imageUrl: coverImageUrl,
-    coverImage: coverImageUrl,
-    cardImageUrl: coverImageUrl,
-    coverImageUrl,
-    images,
+    thumbnail: primaryImage,
+    image: primaryImage,
+    imageUrl: primaryImage,
+    primaryImage,
+    coverImage: primaryImage,
+    cardImageUrl: primaryImage,
+    coverImageUrl: primaryImage,
+    images: gallery,
+    gallery,
     rating,
     ratingAvg: Number(p.ratingAvg ?? rating.avg ?? 0),
     ratingCount: Number.isFinite(ratingCount) ? ratingCount : 0,
+    reviewCount: Number.isFinite(ratingCount) ? ratingCount : 0,
     reviewSummary,
     likes,
     views,
     orders,
+    soldCount: orders,
+    likeCount: likes,
+    viewCount: views,
+    purchaseCount: orders,
     stats,
-    category: p.category,
+    category: normalizeMarketplaceCategory(p.category, "products") || p.category,
+    categoryRaw: p.category,
+    categoryDisplay: categoryMeta?.displayName || p.category || null,
+    topLevelCategory: categoryMeta?.mainCategory || "products",
+    categorySlug: categoryMeta?.categorySlug || null,
+    categoryMeta,
     subCategory: p.subCategory,
+    subcategoryDisplay: buildCategoryMeta(p.subCategory, locale, "products")?.displayName || p.subCategory || null,
     brand: p.brand,
-    condition: p.condition || "Yangi",
+    condition: p.condition || getProductCopy(locale).conditionNew,
     size: p.size,
     season: p.season,
     audience: p.audience,
@@ -352,20 +471,53 @@ export const toDetailDto = (p: any) => {
     highlights,
     delivery,
     seller,
+    sellerSummary,
     benefits,
     specs,
     options,
     policies,
-    stock: p.stock ?? p.quantity ?? 24,
+    shippingInfo,
+    returnPolicy,
+    stock: stockCount,
+    stockCount,
+    stockStatus: card.display.values.stockStatus,
     createdAt: p.createdAt ? new Date(p.createdAt) : undefined,
     updatedAt: p.updatedAt ? new Date(p.updatedAt) : undefined,
-    detailSections
+    detailSections,
+    card
+  };
+};
+
+const fetchProductCardPage = async (
+  req: Request,
+  options?: { defaultLimit?: number; forcedSort?: string; baseMatch?: Record<string, unknown> }
+) => {
+  const state = createProductListingQueryState(req.query as Record<string, unknown>, {
+    defaultLimit: options?.defaultLimit ?? 24,
+    maxLimit: 50,
+    defaultSort: options?.forcedSort || "newest"
+  });
+  if (options?.forcedSort) state.sortValue = options.forcedSort;
+
+  const [result] = await Product.aggregate(buildProductListingPipeline(state, { baseMatch: options?.baseMatch }));
+  const rawItems = Array.isArray(result?.data) ? result.data : [];
+  const total = Number(result?.metadata?.[0]?.total || 0);
+  const context = await buildProductCardContext(rawItems, req.user?._id || null);
+
+  return {
+    page: state.page,
+    limit: state.limit,
+    total,
+    totalPages: Math.max(Math.ceil(total / state.limit), 1),
+    categoryKey: state.subcategoryKey || state.categoryKey || null,
+    sortValue: state.sortValue,
+    products: serializeProductCards(rawItems, req.locale, context)
   };
 };
 
 export const createProduct = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const { title, description, price, currency, images, category, coverImageUrl, imageUrl, slug } = req.body;
     if (!title || !price) {
       return res.status(400).json({ message: "title and price required" });
@@ -382,6 +534,7 @@ export const createProduct = async (req: Request, res: Response) => {
     }
 
     const numericPrice = Number(price);
+    const normalizedCategory = normalizeMarketplaceCategory(category, "products") || normalizeText(category);
     const windowStart = new Date(Date.now() - DUPLICATE_GUARD_WINDOW_MS);
     const recentProducts = await Product.find({
       createdBy: req.user._id,
@@ -391,11 +544,10 @@ export const createProduct = async (req: Request, res: Response) => {
       .lean();
 
     const normalizedTitle = normalizeText(title);
-    const normalizedCategory = normalizeText(category);
     const duplicate = recentProducts.find(
       (item) =>
         normalizeText(item.title) === normalizedTitle &&
-        normalizeText(item.category) === normalizedCategory &&
+        normalizeMarketplaceCategory(item.category, "products") === normalizedCategory &&
         Number(item.price) === numericPrice
     );
     if (duplicate) {
@@ -416,12 +568,12 @@ export const createProduct = async (req: Request, res: Response) => {
       price,
       currency: currency || "USD",
       images: finalImages.map((img: string) => ensureAbsoluteUrl(img) || img),
-      category,
+      category: normalizedCategory,
       coverImageUrl: finalCoverImageUrl,
       cardImageUrl: finalCoverImageUrl,
       createdBy: req.user._id
     });
-    return res.status(201).json({ product });
+    return res.status(201).json({ product: toDetailDto(product, req.locale) });
   } catch (err) {
     console.error("createProduct error", err);
     return res.status(500).json({ message: "Server error" });
@@ -430,26 +582,18 @@ export const createProduct = async (req: Request, res: Response) => {
 
 export const listProducts = async (req: Request, res: Response) => {
   try {
-    const page = parsePositiveInt(req.query.page, 1, 1000000);
-    const limit = parsePositiveInt(req.query.limit, 24, 50);
-    const skip = (page - 1) * limit;
-
-    const [items, total] = await Promise.all([
-      Product.find({})
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .populate("createdBy", "name username role avatarUrl"),
-      Product.countDocuments({})
-    ]);
-
-    const products = items.map((p) => toDetailDto(p));
+    const result = await fetchProductCardPage(req, { defaultLimit: 24 });
     return res.json({
-      page,
-      limit,
-      total,
-      totalPages: Math.max(Math.ceil(total / limit), 1),
-      products
+      page: result.page,
+      limit: result.limit,
+      total: result.total,
+      totalPages: result.totalPages,
+      products: result.products,
+      uiMeta: buildListingUiMeta(req, "products", {
+        categoryKey: result.categoryKey,
+        resultCount: result.total,
+        sortValue: result.sortValue
+      })
     });
   } catch (err) {
     console.error("listProducts error", err);
@@ -461,18 +605,32 @@ export const productDetail = async (req: Request, res: Response) => {
   try {
     const identifier = String(req.params.identifier || req.params.id || "").trim();
     if (!identifier) return res.status(400).json({ message: "Product identifier is required" });
-    const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const titleCandidate = identifier.replace(/-/g, " ").trim();
-    let product = mongoose.Types.ObjectId.isValid(identifier)
-      ? await Product.findById(identifier).populate("createdBy", "name username role avatarUrl")
-      : await Product.findOne({
-          $or: [{ slug: identifier.toLowerCase() }, { title: { $regex: `^${escaped}$`, $options: "i" } }, { title: titleCandidate }]
-        }).populate("createdBy", "name username role avatarUrl");
-    if (!product) {
-      product = await findProductByLegacyIdentifier(identifier);
-    }
+    const baseProduct = await findProductByIdentifier(identifier);
+    const product = baseProduct
+      ? await baseProduct.populate("createdBy", "name username role avatarUrl")
+      : null;
     if (!product) return res.status(404).json({ message: "Product not found" });
-    return res.json(toDetailDto(product));
+    const dto = toDetailDto(product, req.locale);
+    const recommendations = await buildRecommendationModulesSafe({
+      surface: "DETAIL",
+      locale: req.locale,
+      userId: req.user?._id || null,
+      entityType: "PRODUCT",
+      entityId: String((product as any)._id || ""),
+      entityIdentifier: String((product as any).slug || (product as any)._id || ""),
+      categoryKey: dto.category || null,
+      limitPerModule: 4
+    }, "product.detail.recommendations");
+    await recordRecommendationSignal({
+      userId: req.user?._id || null,
+      entityType: "PRODUCT",
+      entityId: String((product as any)._id || ""),
+      entityIdentifier: String((product as any).slug || (product as any)._id || ""),
+      action: "VIEW",
+      categoryKey: dto.category || null,
+      locale: req.locale
+    }).catch(() => null);
+    return res.json({ ...dto, recommendations });
   } catch (err) {
     console.error("productDetail error", err);
     return res.status(500).json({ message: "Server error" });
@@ -488,22 +646,21 @@ export const productStat = async (req: Request, res: Response) => {
     }
 
     if (!identifier) return res.status(400).json({ message: "Product identifier is required" });
-    const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const titleCandidate = identifier.replace(/-/g, " ").trim();
-    let product = mongoose.Types.ObjectId.isValid(identifier)
-      ? await Product.findById(identifier)
-      : await Product.findOne({
-          $or: [{ slug: identifier.toLowerCase() }, { title: { $regex: `^${escaped}$`, $options: "i" } }, { title: titleCandidate }]
-        });
-    if (!product) {
-      product = await findProductByLegacyIdentifier(identifier);
-    }
+    const product = await findProductByIdentifier(identifier);
     if (!product) return res.status(404).json({ message: "Product not found" });
 
-    const stats = { views: product.views || 0, likes: product.likes || 0, purchases: product.orders || 0 };
+    const stats = {
+      views: Number(product.viewCount ?? product.views ?? 0),
+      likes: Number(product.likeCount ?? product.likes ?? 0),
+      purchases: Number(product.purchaseCount ?? product.orders ?? 0)
+    };
     if (action === "view") stats.views = (stats.views || 0) + 1;
     if (action === "like") stats.likes = (stats.likes || 0) + 1;
     if (action === "purchase") stats.purchases = (stats.purchases || 0) + 1;
+
+    product.viewCount = stats.views || 0;
+    product.likeCount = stats.likes || 0;
+    product.purchaseCount = stats.purchases || 0;
     product.views = stats.views || 0;
     product.likes = stats.likes || 0;
     product.orders = stats.purchases || 0;
@@ -517,9 +674,9 @@ export const productStat = async (req: Request, res: Response) => {
 
 export const myProducts = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
-    const products = await Product.find({ createdBy: req.user._id });
-    return res.json({ products });
+    if (!req.user) return respondAuthRequired(req, res);
+    const products = await Product.find({ createdBy: req.user._id }).lean();
+    return res.json({ products: products.map((product) => toDetailDto(product, req.locale)) });
   } catch (err) {
     console.error("myProducts error", err);
     return res.status(500).json({ message: "Server error" });
@@ -528,7 +685,7 @@ export const myProducts = async (req: Request, res: Response) => {
 
 export const updateProductStatus = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const { id } = req.params;
     const { status } = req.body;
     const product = await Product.findById(id);
@@ -539,7 +696,7 @@ export const updateProductStatus = async (req: Request, res: Response) => {
     }
     product.status = status;
     await product.save();
-    return res.json({ product });
+    return res.json({ product: toDetailDto(product, req.locale) });
   } catch (err) {
     console.error("updateProductStatus error", err);
     return res.status(500).json({ message: "Server error" });
@@ -548,27 +705,14 @@ export const updateProductStatus = async (req: Request, res: Response) => {
 
 export const getPopularProducts = async (req: Request, res: Response) => {
   try {
-    const page = parsePositiveInt(req.query.page, 1, 1000000);
-    const limit = parsePositiveInt(req.query.limit, 8, 50);
-    const skip = (page - 1) * limit;
-
-    const [items, total] = await Promise.all([
-      Product.find({})
-        .sort({ orders: -1, views: -1, likes: -1, createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .populate("createdBy", "name username role avatarUrl"),
-      Product.countDocuments({})
-    ]);
-
-    const products = items.map((p) => toDetailDto(p));
+    const result = await fetchProductCardPage(req, { defaultLimit: 8, forcedSort: "popular" });
 
     return res.json({
-      page,
-      limit,
-      total,
-      totalPages: Math.max(Math.ceil(total / limit), 1),
-      items: products
+      page: result.page,
+      limit: result.limit,
+      total: result.total,
+      totalPages: result.totalPages,
+      items: result.products
     });
   } catch (err) {
     console.error("getPopularProducts error", err);
@@ -578,27 +722,14 @@ export const getPopularProducts = async (req: Request, res: Response) => {
 
 export const getTrendingProducts = async (req: Request, res: Response) => {
   try {
-    const page = parsePositiveInt(req.query.page, 1, 1000000);
-    const limit = parsePositiveInt(req.query.limit, 9, 50);
-    const skip = (page - 1) * limit;
-
-    const [items, total] = await Promise.all([
-      Product.find({})
-        .sort({ orders: -1, views: -1, likes: -1, createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .populate("createdBy", "name username role avatarUrl"),
-      Product.countDocuments({})
-    ]);
-
-    const products = items.map((p) => toDetailDto(p));
+    const result = await fetchProductCardPage(req, { defaultLimit: 9, forcedSort: "popular" });
 
     return res.json({
-      page,
-      limit,
-      total,
-      totalPages: Math.max(Math.ceil(total / limit), 1),
-      items: products
+      page: result.page,
+      limit: result.limit,
+      total: result.total,
+      totalPages: result.totalPages,
+      items: result.products
     });
   } catch (err) {
     console.error("getTrendingProducts error", err);

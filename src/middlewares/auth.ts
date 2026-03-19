@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import { t } from "../i18n";
 import { verifyAccessToken } from "../utils/jwt";
 import { requireAuth } from "./requireAuth";
 
@@ -21,10 +22,10 @@ export function authOptional(req: Request, _res: Response, next: NextFunction) {
 export function roleRequired(roles: ("USER" | "AGENT" | "ADMIN")[]) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
-      return res.status(401).json({ message: "Not authenticated" });
+      return res.status(401).json({ message: t(req, "auth.session.required.message") });
     }
     if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ message: "Forbidden" });
+      return res.status(403).json({ message: t(req, "common.errors.forbidden.message") });
     }
     return next();
   };

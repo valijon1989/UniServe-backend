@@ -50,7 +50,9 @@ const avatarStorage = multer.diskStorage({
 
 const avatarFileFilter = (_req: any, file: any, cb: any) => {
   if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
-    return cb(new Error("Only JPG, PNG, WEBP or SVG images are allowed"));
+    const error = new Error("invalid_avatar_file_type") as Error & { code?: string };
+    error.code = "AVATAR_INVALID_TYPE";
+    return cb(error);
   }
   return cb(null, true);
 };

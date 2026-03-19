@@ -7,9 +7,18 @@ import { User } from "../models/User";
 import { formatPost } from "./postController";
 import { communityGroupFixtures } from "../data/communityGroups";
 import { communityPostFixtures, CommunityPostFixture } from "../data/communityPosts";
+import { buildCategoryMeta, normalizeMarketplaceCategory } from "../services/categoryTaxonomy";
+import {
+  getCommunityPrivacyLabel,
+  getCommunityTypeLabel,
+  localizeKeywordList,
+  localizeKeyword,
+  resolveLocalizedTextField
+} from "../services/localizedContent";
 
-const buildGroupDto = (group: any) => {
+const buildGroupDto = (group: any, locale?: Request["locale"]) => {
   const lastActivity = group.lastActivity || group.updatedAt;
+  const categoryMeta = buildCategoryMeta(group.category, locale, "community");
   const reviews = (group.reviews || []).slice(-3).map((review: any) => ({
     rating: review.rating,
     comment: review.comment,
@@ -37,10 +46,14 @@ const buildGroupDto = (group: any) => {
 
   return {
     id: group._id,
-    title: group.title,
-    description: group.description,
+    title: resolveLocalizedTextField(group, "title", locale, group.title),
+    description: resolveLocalizedTextField(group, "description", locale, group.description),
     type: group.groupType || group.channelType || "group",
-    category: group.category,
+    typeLabel: getCommunityTypeLabel(group.groupType || group.channelType || "group", locale),
+    category: normalizeMarketplaceCategory(group.category, "community") || group.category,
+    categoryRaw: group.category,
+    categorySlug: categoryMeta?.categorySlug || null,
+    categoryMeta,
     isVerified: Boolean(group.isVerified),
     lastActivity,
     reviews,
@@ -50,10 +63,12 @@ const buildGroupDto = (group: any) => {
     host: hostProfile ? hostProfile.name || hostProfile.username : null,
     hostProfile,
     privacy: group.privacy,
+    privacyLabel: getCommunityPrivacyLabel(group.privacy, locale),
     requiresApproval: Boolean(group.requiresApproval),
     pendingApprovals: group.pendingApprovals || 0,
-    tags: group.tags,
+    tags: localizeKeywordList(group.tags, locale),
     channelType: group.channelType,
+    channelTypeLabel: getCommunityTypeLabel(group.channelType, locale),
     createdAt: group.createdAt,
     updatedAt: group.updatedAt
   };
@@ -98,7 +113,7 @@ communityGroupFixtures.forEach((fixture) => {
   }
 });
 
-const buildFallbackGroup = (fixture: typeof communityGroupFixtures[number]) => {
+const buildFallbackGroup = (fixture: typeof communityGroupFixtures[number], locale?: Request["locale"]) => {
   return buildGroupDto({
     _id: fixture.slug,
     title: fixture.title,
@@ -126,7 +141,7 @@ const buildFallbackGroup = (fixture: typeof communityGroupFixtures[number]) => {
           isVerified: true
         }
       : undefined
-  });
+  }, locale);
 };
 
 const toFallbackActivityFeed = (slug: string) =>
@@ -149,7 +164,7 @@ const toFallbackActivityFeed = (slug: string) =>
     })
   );
 
-const convertFixtureToPost = (fixture: CommunityPostFixture) => {
+const convertFixtureToPost = (fixture: CommunityPostFixture, locale?: Request["locale"]) => {
   const images = fixture.attachments.filter((item) => item.type === "image").map((item) => item.url);
   const videoUrl = fixture.attachments.find((item) => item.type === "video")?.url || "";
   return formatPost({
@@ -176,12 +191,12 @@ const convertFixtureToPost = (fixture: CommunityPostFixture) => {
     likes: Array.from({ length: fixture.likes }).map((_, index) => index),
     comments: Array.from({ length: fixture.replies }).map(() => ({
       user: { name: "Fallback User", username: "fallback_user" },
-      text: "Javob",
+      text: localizeKeyword("comment", locale),
       createdAt: fixture.createdAt
     })),
     createdAt: fixture.createdAt,
     updatedAt: fixture.createdAt
-  });
+  }, { locale });
 };
 
 export const listGroups = async (req: Request, res: Response) => {
@@ -190,7 +205,7 @@ export const listGroups = async (req: Request, res: Response) => {
     const requestedType =
       typeof req.query.type === "string" ? normalizeType(req.query.type) : undefined;
     const filter: Record<string, any> = { isActive: true };
-    if (category && category !== "all") filter.category = category;
+    if (category && category !== "all") filter.category = normalizeMarketplaceCategory(category, "community") || category;
     if (requestedType) filter.groupType = requestedType;
 
     const groups = await CommunityGroupModel.find(filter)
@@ -198,7 +213,7 @@ export const listGroups = async (req: Request, res: Response) => {
       .sort({ isVerified: -1, lastActivity: -1, members: -1 })
       .lean();
 
-    return res.json({ groups: groups.map(buildGroupDto) });
+    return res.json({ groups: groups.map((group) => buildGroupDto(group, req.locale)) });
   } catch (err) {
     console.error("listGroups error", err);
     return res.status(500).json({ message: "Server error" });
@@ -231,7 +246,7 @@ export const getGroupDetail = async (req: Request, res: Response) => {
       const fallbackFixture = fallbackGroupMap.get(lookupKey);
       if (fallbackFixture) {
         return res.json({
-          group: buildFallbackGroup(fallbackFixture),
+          group: buildFallbackGroup(fallbackFixture, req.locale),
           activityFeed: toFallbackActivityFeed(fallbackFixture.slug),
           membership: {
             isMember: Boolean(req.user),
@@ -252,7 +267,7 @@ export const getGroupDetail = async (req: Request, res: Response) => {
       .populate("user", "name username avatarUrl role isVerified");
 
     return res.json({
-      group: buildGroupDto(group),
+      group: buildGroupDto(group, req.locale),
       activityFeed: activities.map(formatActivityEntry),
       membership: {
         isMember: Boolean(req.user),
@@ -272,6 +287,7 @@ export const createGroup = async (req: Request, res: Response) => {
     if (!title || !category) {
       return res.status(400).json({ message: "title and category are required" });
     }
+    const normalizedCategory = normalizeMarketplaceCategory(category, "community") || String(category).trim();
     const userId = req.user?._id;
     const groupType = normalizeType(type);
     const privacyMode = normalizePrivacy(privacy);
@@ -280,7 +296,7 @@ export const createGroup = async (req: Request, res: Response) => {
     const group = await CommunityGroupModel.create({
       title,
       description: description || "",
-      category,
+      category: normalizedCategory,
       tags: preparedTags,
       groupType,
       channelType: groupType,
@@ -292,7 +308,7 @@ export const createGroup = async (req: Request, res: Response) => {
 
     await group.populate("createdBy", "name username role avatarUrl");
 
-    return res.status(201).json({ group: buildGroupDto(group) });
+    return res.status(201).json({ group: buildGroupDto(group, req.locale) });
   } catch (err) {
     console.error("createGroup error", err);
     return res.status(500).json({ message: "Server error" });
@@ -323,7 +339,9 @@ export const getCommunityGroupPosts = async (req: Request, res: Response) => {
     }
 
     if (req.query.type) filters.type = String(req.query.type).toLowerCase();
-    if (req.query.category) filters.category = String(req.query.category).toLowerCase();
+    if (req.query.category) {
+      filters.category = normalizeMarketplaceCategory(req.query.category, "community") || String(req.query.category).toLowerCase();
+    }
     if (req.query.language) filters.language = String(req.query.language);
 
     const queryTerm = typeof req.query.q === "string" ? req.query.q.trim() : "";
@@ -347,12 +365,12 @@ export const getCommunityGroupPosts = async (req: Request, res: Response) => {
         .populate("comments.user", "name username avatarUrl role")
     ]);
 
-    const formatted = posts.map(formatPost);
+    const formatted = posts.map((post) => formatPost(post, { locale: req.locale }));
     if (formatted.length < 3 && fallbackSlug) {
       const fallbackPosts = communityPostFixtures
         .filter((fixture) => fixture.groupSlug === fallbackSlug)
         .slice(0, Math.max(0, 6 - formatted.length))
-        .map(convertFixtureToPost);
+        .map((fixture) => convertFixtureToPost(fixture, req.locale));
       formatted.push(...fallbackPosts);
     }
 
@@ -395,7 +413,9 @@ export const getCommunityPosts = async (req: Request, res: Response) => {
       }
     }
     if (req.query.type) filters.type = String(req.query.type).toLowerCase();
-    if (req.query.category) filters.category = String(req.query.category).toLowerCase();
+    if (req.query.category) {
+      filters.category = normalizeMarketplaceCategory(req.query.category, "community") || String(req.query.category).toLowerCase();
+    }
     if (req.query.language) filters.language = String(req.query.language);
 
     const queryTerm = typeof req.query.q === "string" ? req.query.q.trim() : "";
@@ -419,13 +439,13 @@ export const getCommunityPosts = async (req: Request, res: Response) => {
         .populate("comments.user", "name username avatarUrl role")
     ]);
 
-    const formatted = posts.map(formatPost);
+    const formatted = posts.map((post) => formatPost(post, { locale: req.locale }));
     let fallbackPosts: any[] = [];
     if (fallbackSlug) {
       fallbackPosts = communityPostFixtures
         .filter((fixture) => fixture.groupSlug === fallbackSlug)
         .slice(0, Math.max(0, limit - formatted.length))
-        .map(convertFixtureToPost);
+        .map((fixture) => convertFixtureToPost(fixture, req.locale));
     }
     const combined = [...formatted, ...fallbackPosts].slice(0, limit);
     const totalItems = Math.max(total, combined.length);
@@ -497,7 +517,7 @@ export const rateGroup = async (req: Request, res: Response) => {
 
     await logActivity(id, req.user?._id, "rate", { rating: ratingValue, comment });
 
-    return res.json({ group: buildGroupDto(await group.populate("createdBy", "name username role avatarUrl")) });
+    return res.json({ group: buildGroupDto(await group.populate("createdBy", "name username role avatarUrl"), req.locale) });
   } catch (err) {
     console.error("rateGroup error", err);
     return res.status(500).json({ message: "Server error" });

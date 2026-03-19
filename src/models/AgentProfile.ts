@@ -18,6 +18,13 @@ export interface IAgentProfile extends Document {
   gender?: "male" | "female" | "other";
   phone?: string;
   telegram?: string;
+  verificationEmail?: string;
+  verificationDocument?: string;
+  verificationHomeAddress?: string;
+  verificationFaceId?: string;
+  verificationRequestedAt?: Date | null;
+  verificationReviewedAt?: Date | null;
+  verificationRejectionReason?: string | null;
   serviceCategory?: string;
   educationCategories?: string[];
   educationLanguages?: string[];
@@ -40,6 +47,12 @@ export interface IAgentProfile extends Document {
   };
   taxiLastSeenAt?: Date;
   payoutAccount?: string;
+  adminStatus: "ACTIVE" | "PENDING" | "SUSPENDED";
+  complaintCount: number;
+  responseRate: number;
+  badge?: string;
+  internalNotes?: string;
+  lastModeratedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -59,6 +72,13 @@ const AgentProfileSchema = new Schema<IAgentProfile>(
     gender: { type: String, enum: ["male", "female", "other"] },
     phone: { type: String },
     telegram: { type: String },
+    verificationEmail: { type: String, trim: true, lowercase: true, default: null },
+    verificationDocument: { type: String, trim: true, default: null },
+    verificationHomeAddress: { type: String, trim: true, default: null },
+    verificationFaceId: { type: String, trim: true, default: null },
+    verificationRequestedAt: { type: Date, default: null },
+    verificationReviewedAt: { type: Date, default: null },
+    verificationRejectionReason: { type: String, trim: true, default: null },
     serviceCategory: {
       type: String,
       trim: true,
@@ -84,7 +104,13 @@ const AgentProfileSchema = new Schema<IAgentProfile>(
       coordinates: { type: [Number], default: [0, 0] }
     },
     taxiLastSeenAt: { type: Date },
-    payoutAccount: { type: String }
+    payoutAccount: { type: String },
+    adminStatus: { type: String, enum: ["ACTIVE", "PENDING", "SUSPENDED"], default: "PENDING", index: true },
+    complaintCount: { type: Number, default: 0 },
+    responseRate: { type: Number, default: 0 },
+    badge: { type: String },
+    internalNotes: { type: String },
+    lastModeratedAt: { type: Date }
   },
   { timestamps: true }
 );

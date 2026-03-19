@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document } from "mongoose";
 
 export type ServiceKind = "SOCIAL" | "MATERIAL";
+export type ServiceStatus = "ACTIVE" | "BLOCKED" | "PENDING";
 
 export interface IService extends Document {
   slug?: string;
@@ -8,6 +9,7 @@ export interface IService extends Document {
   description: string;
   kind: ServiceKind;
   category: string;
+  status: ServiceStatus;
   price?: number;
   hourlyRate?: number;
   oldPrice?: number;
@@ -42,6 +44,7 @@ const ServiceSchema = new Schema<IService>(
     description: { type: String },
     kind: { type: String, enum: ["SOCIAL", "MATERIAL"], required: true },
     category: { type: String, required: true },
+    status: { type: String, enum: ["ACTIVE", "BLOCKED", "PENDING"], default: "PENDING", index: true },
     price: { type: Number },
     hourlyRate: { type: Number },
     oldPrice: { type: Number },

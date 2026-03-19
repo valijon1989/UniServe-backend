@@ -1,5 +1,4 @@
 import { Request, Response } from "express";
-import mongoose from "mongoose";
 import { Service } from "../models/Service";
 import { parsePositiveInt } from "../utils/pagination";
 import { ensureAbsoluteUrl } from "../utils/imageHelpers";
@@ -12,55 +11,16 @@ import {
   sanitizeImageArray
 } from "../utils/resolveCoverImage";
 import { resolveSaleMeta } from "../services/listingSelector";
+import { findServiceByIdentifier } from "../services/serviceLookup";
+import { buildCategoryMeta, normalizeMarketplaceCategory } from "../services/categoryTaxonomy";
+import { localizeKeyword, resolveLocalizedTextField } from "../services/localizedContent";
+import { buildRecommendationModulesSafe, recordRecommendationSignal } from "../services/recommendationEngine";
+import { buildListingUiMeta } from "../services/sharedFilters";
+import { respondAuthRequired } from "../utils/controllerResponses";
 
 const DUPLICATE_GUARD_WINDOW_MS = Number(process.env.DUPLICATE_GUARD_WINDOW_MS || 15_000);
 const SERVICE_FALLBACK = ensureAbsoluteUrl("/images/fallback-service.png") || "http://localhost:5001/images/fallback-service.png";
 const normalizeText = (value: unknown): string => String(value || "").trim().toLowerCase();
-
-const LEGACY_SERVICE_SLUG_MAP: Record<string, string> = {
-  "build-brick-1": "construction-service-1",
-  "build-brick-2": "construction-service-2",
-  "taxi-limuzin-2-1-v11": "airport-delivery-support"
-};
-
-const buildIdentifierTokens = (identifier: string): string[] =>
-  identifier
-    .toLowerCase()
-    .split(/[^a-z0-9]+/g)
-    .map((token) => token.trim())
-    .filter((token) => token && !/^\\d+$/.test(token));
-
-const findServiceByLegacyIdentifier = async (identifier: string) => {
-  const alias = LEGACY_SERVICE_SLUG_MAP[identifier.toLowerCase()];
-  if (alias) {
-    const byAlias = await Service.findOne({ slug: alias }).populate("createdBy", "name username role avatarUrl");
-    if (byAlias) return byAlias;
-  }
-
-  const tokens = buildIdentifierTokens(identifier);
-  if (!tokens.length) return null;
-  const pattern = tokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-  if (!pattern) return null;
-
-  const candidates = await Service.find({
-    $or: [{ slug: { $regex: pattern, $options: "i" } }, { title: { $regex: pattern, $options: "i" } }]
-  })
-    .sort({ createdAt: -1 })
-    .limit(20)
-    .populate("createdBy", "name username role avatarUrl");
-
-  if (!candidates.length) return null;
-
-  const scored = candidates
-    .map((item) => {
-      const hay = `${String(item.slug || "")} ${String(item.title || "")} ${String(item.category || "")}`.toLowerCase();
-      const score = tokens.reduce((acc, token) => (hay.includes(token) ? acc + 1 : acc), 0);
-      return { item, score };
-    })
-    .sort((a, b) => b.score - a.score);
-
-  return scored[0]?.item || null;
-};
 
 const buildUniqueServiceSlug = async (title: string) => {
   const base = slugify(title) || "service";
@@ -85,7 +45,7 @@ const pickCreator = (createdBy: any) => {
   return { _id, name, username, role, avatarUrl };
 };
 
-export const attachServiceCover = (service: any) => {
+export const attachServiceCover = (service: any, locale?: Request["locale"]) => {
   const raw = service?.toObject ? service.toObject() : { ...service };
   const creator = pickCreator(raw.createdBy);
   const images = sanitizeImageArray(raw.images);
@@ -107,22 +67,30 @@ export const attachServiceCover = (service: any) => {
   const originalPrice = saleMeta.originalPrice ?? (Number.isFinite(price) ? price : null);
   const isOnSale = saleMeta.isSale;
   const agent = creator
-    ? {
+      ? {
         id: creator._id?.toString?.() || String(creator._id || ""),
-        name: creator.name || "UniServe Agent",
+        name: creator.name || localizeKeyword("service", locale),
         avatarUrl: creator.avatarUrl || null,
         rating: ratingAvg
       }
     : undefined;
 
+  const categoryMeta = buildCategoryMeta(raw.category, locale);
+  const title = resolveLocalizedTextField(raw, "title", locale, raw.title ?? raw.name ?? "");
+  const description = resolveLocalizedTextField(raw, "description", locale, raw.description ?? "");
   return {
     _id: raw._id,
     id: raw._id?.toString?.() ?? raw.id,
     type: "service",
-    title: raw.title ?? raw.name ?? "",
-    description: raw.description ?? "",
+    title,
+    description,
     kind: raw.kind,
-    category: raw.category,
+    kindLabel: localizeKeyword(raw.kind === "MATERIAL" ? "seller" : "service", locale),
+    category: normalizeMarketplaceCategory(raw.category) || raw.category,
+    categoryRaw: raw.category,
+    topLevelCategory: categoryMeta?.mainCategory || null,
+    categorySlug: categoryMeta?.categorySlug || null,
+    categoryMeta,
     hourlyRate: raw.hourlyRate,
     currency: raw.currency ?? "USD",
     location: raw.location,
@@ -160,11 +128,12 @@ export const attachServiceCover = (service: any) => {
 
 export const createService = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const { title, description, kind, category, hourlyRate, currency, location, images, coverImageUrl, imageUrl, slug } = req.body;
     if (!title || !kind || !category) {
       return res.status(400).json({ message: "title, kind, category required" });
     }
+    const normalizedCategory = normalizeMarketplaceCategory(category) || normalizeText(category);
     if (
       isRandomUnsplashUrl(coverImageUrl) ||
       isRandomUnsplashUrl(imageUrl) ||
@@ -184,12 +153,11 @@ export const createService = async (req: Request, res: Response) => {
       .lean();
 
     const normalizedTitle = normalizeText(title);
-    const normalizedCategory = normalizeText(category);
     const duplicate = recentServices.find((item) => {
       const itemPrice = Number((item as any).price ?? item.hourlyRate);
       return (
         normalizeText(item.title) === normalizedTitle &&
-        normalizeText(item.category) === normalizedCategory &&
+        normalizeMarketplaceCategory(item.category) === normalizedCategory &&
         itemPrice === numericPrice
       );
     });
@@ -210,7 +178,7 @@ export const createService = async (req: Request, res: Response) => {
       slug: finalSlug || undefined,
       description,
       kind,
-      category,
+      category: normalizedCategory,
       hourlyRate,
       currency: currency || "USD",
       location,
@@ -219,7 +187,7 @@ export const createService = async (req: Request, res: Response) => {
       coverImageUrl: finalCoverImageUrl,
       createdBy: req.user._id
     });
-    return res.status(201).json({ service: attachServiceCover(service) });
+    return res.status(201).json({ service: attachServiceCover(service, req.locale) });
   } catch (err) {
     console.error("createService error", err);
     return res.status(500).json({ message: "Server error" });
@@ -230,26 +198,55 @@ export const listServices = async (req: Request, res: Response) => {
   try {
     const page = parsePositiveInt(req.query.page, 1, 1000000);
     const limit = parsePositiveInt(req.query.limit, 24, 50);
+    const category = normalizeMarketplaceCategory(req.query.category, "services");
+    const filter: Record<string, unknown> = category ? { category } : {};
+    const location = normalizeText(req.query.location);
+    if (location) filter.location = new RegExp(location, "i");
+
+    const items = await Service.find(filter)
+      .sort({ createdAt: -1 })
+      .populate("createdBy", "name username role avatarUrl")
+      .lean();
+
+    const ratingMin = Number(req.query.rating || 0);
+    const minPrice = Number(req.query.minPrice ?? req.query.priceMin ?? 0);
+    const maxPrice = Number(req.query.maxPrice ?? req.query.priceMax ?? 0);
+    const sortMode = normalizeText(req.query.sort).toLowerCase() || "newest";
+
+    const filtered = items
+      .map((service) => attachServiceCover(service, req.locale))
+      .filter((service) => {
+        const ratingValue = Number(service.ratingAvg ?? 0);
+        const effectivePrice = Number(service.salePrice ?? service.price ?? service.hourlyRate ?? 0);
+        if (ratingMin > 0 && ratingValue < ratingMin) return false;
+        if (minPrice > 0 && effectivePrice < minPrice) return false;
+        if (maxPrice > 0 && effectivePrice > maxPrice) return false;
+        return true;
+      });
+
+    filtered.sort((left, right) => {
+      if (sortMode === "top_rated") return Number(right.ratingAvg || 0) - Number(left.ratingAvg || 0);
+      if (sortMode === "popular") return Number(right.orders || 0) - Number(left.orders || 0);
+      if (sortMode === "price_asc") return Number(left.salePrice ?? left.price ?? 0) - Number(right.salePrice ?? right.price ?? 0);
+      if (sortMode === "price_desc") return Number(right.salePrice ?? right.price ?? 0) - Number(left.salePrice ?? left.price ?? 0);
+      return new Date(String(right.createdAt || 0)).getTime() - new Date(String(left.createdAt || 0)).getTime();
+    });
+
+    const total = filtered.length;
     const skip = (page - 1) * limit;
-
-    const [items, total] = await Promise.all([
-      Service.find({})
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .populate("createdBy", "name username role avatarUrl")
-        .lean(),
-      Service.countDocuments({})
-    ]);
-
-    const services = items.map((service) => attachServiceCover(service));
+    const services = filtered.slice(skip, skip + limit);
 
     return res.json({
       page,
       limit,
       total,
       totalPages: Math.max(Math.ceil(total / limit), 1),
-      services
+      services,
+      uiMeta: buildListingUiMeta(req, "services", {
+        categoryKey: category || null,
+        resultCount: total,
+        sortValue: sortMode
+      })
     });
   } catch (err) {
     console.error("listServices error", err);
@@ -259,9 +256,9 @@ export const listServices = async (req: Request, res: Response) => {
 
 export const myServices = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
-    const services = await Service.find({ createdBy: req.user._id });
-    return res.json({ services });
+    if (!req.user) return respondAuthRequired(req, res);
+    const services = await Service.find({ createdBy: req.user._id }).lean();
+    return res.json({ services: services.map((service) => attachServiceCover(service, req.locale)) });
   } catch (err) {
     console.error("myServices error", err);
     return res.status(500).json({ message: "Server error" });
@@ -288,7 +285,7 @@ export const getTrendingServices = async (req: Request, res: Response) => {
       limit,
       total,
       totalPages: Math.max(Math.ceil(total / limit), 1),
-      items: items.map((service) => attachServiceCover(service))
+      items: items.map((service) => attachServiceCover(service, req.locale))
     });
   } catch (err) {
     console.error("getTrendingServices error", err);
@@ -300,20 +297,33 @@ export const getServiceDetail = async (req: Request, res: Response) => {
   try {
     const identifier = String(req.params.identifier || req.params.id || "").trim();
     if (!identifier) return res.status(400).json({ message: "Service identifier is required" });
-    const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const titleCandidate = identifier.replace(/-/g, " ").trim();
-    let service = mongoose.Types.ObjectId.isValid(identifier)
-      ? await Service.findById(identifier).populate("createdBy", "name username role avatarUrl")
-      : await Service.findOne({
-          $or: [{ slug: identifier.toLowerCase() }, { title: { $regex: `^${escaped}$`, $options: "i" } }, { title: titleCandidate }]
-        }).populate("createdBy", "name username role avatarUrl");
-    if (!service) {
-      service = await findServiceByLegacyIdentifier(identifier);
-    }
+    const service = await findServiceByIdentifier(identifier);
     if (!service) {
       return res.status(404).json({ message: "Service not found" });
     }
-    return res.json({ service: attachServiceCover(service) });
+    const dto = attachServiceCover(service, req.locale);
+    const recommendations = await buildRecommendationModulesSafe({
+      surface: "DETAIL",
+      locale: req.locale,
+      userId: req.user?._id || null,
+      entityType: "SERVICE",
+      entityId: String((service as any)._id || ""),
+      entityIdentifier: String((service as any).slug || (service as any)._id || ""),
+      categoryKey: dto.category || null,
+      location: dto.location || null,
+      limitPerModule: 4
+    }, "service.detail.recommendations");
+    await recordRecommendationSignal({
+      userId: req.user?._id || null,
+      entityType: "SERVICE",
+      entityId: String((service as any)._id || ""),
+      entityIdentifier: String((service as any).slug || (service as any)._id || ""),
+      action: "VIEW",
+      categoryKey: dto.category || null,
+      location: dto.location || null,
+      locale: req.locale
+    }).catch(() => null);
+    return res.json({ service: dto, recommendations });
   } catch (err) {
     console.error("getServiceDetail error", err);
     return res.status(500).json({ message: "Server error" });

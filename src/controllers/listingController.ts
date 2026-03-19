@@ -20,6 +20,7 @@ import {
   selectWeeklyTopListings,
   toTypeIdKey
 } from "../services/listingSelector";
+import { buildRecommendationModulesSafe } from "../services/recommendationEngine";
 
 type ListingKind = "product" | "service";
 type HomeListing = {
@@ -461,7 +462,7 @@ const toHomeFallbackDto = (item: HomeListing) => ({
   images: item.images
 });
 
-const serializeHomeItems = async (items: HomeListing[]) => {
+const serializeHomeItems = async (items: HomeListing[], locale?: Request["locale"]) => {
   if (!items.length) return [];
 
   const productIds = items.filter((item) => item.type === "product").map((item) => item._id);
@@ -476,8 +477,8 @@ const serializeHomeItems = async (items: HomeListing[]) => {
       : Promise.resolve([] as any[])
   ]);
 
-  const productMap = new Map(productDocs.map((doc) => [String(doc._id), toDetailDto(doc)]));
-  const serviceMap = new Map(serviceDocs.map((doc) => [String(doc._id), attachServiceCover(doc)]));
+  const productMap = new Map(productDocs.map((doc) => [String(doc._id), toDetailDto(doc, locale)]));
+  const serviceMap = new Map(serviceDocs.map((doc) => [String(doc._id), attachServiceCover(doc, locale)]));
 
   return items.map((item) => {
     if (item.type === "product") {
@@ -506,24 +507,32 @@ export const getHomeListings = async (req: Request, res: Response) => {
     const saleMerged = [...saleProducts, ...saleServices];
 
     const topRatedRaw = selectTopRatedListings(topRatedMerged, limit);
-    const topRated = await serializeHomeItems(topRatedRaw);
+    const topRated = await serializeHomeItems(topRatedRaw, req.locale);
 
     const topRatedKeys = new Set(topRatedRaw.map((item) => toTypeIdKey(item)));
     const newestRaw = selectNewestListings(newestMerged, limit, topRatedKeys);
-    const newest = await serializeHomeItems(newestRaw);
+    const newest = await serializeHomeItems(newestRaw, req.locale);
 
     const latestFallbackRaw = selectNewestListings([...newestMerged, ...topRatedMerged], limit);
     const discountedRaw = selectSaleListings(saleMerged, latestFallbackRaw, limit);
-    const discounted = await serializeHomeItems(discountedRaw);
+    const discounted = await serializeHomeItems(discountedRaw, req.locale);
 
     const weeklyTopRaw = selectWeeklyTopListings([...topRatedMerged, ...newestMerged], latestFallbackRaw, limit);
-    const weeklyTop = await serializeHomeItems(weeklyTopRaw);
+    const weeklyTop = await serializeHomeItems(weeklyTopRaw, req.locale);
+
+    const recommendations = await buildRecommendationModulesSafe({
+      surface: "HOME",
+      locale: req.locale,
+      userId: req.user?._id || null,
+      limitPerModule: 4
+    }, "listing.home.recommendations");
 
     return res.json({
       topRated,
       newest,
       discounted,
-      weeklyTop
+      weeklyTop,
+      recommendations
     });
   } catch (err) {
     console.error("getHomeListings error", err);
@@ -683,8 +692,8 @@ export const getHomeDeals = async (req: Request, res: Response) => {
     ]);
 
     const [serializedSale, serializedLatest] = await Promise.all([
-      serializeHomeItems([...saleProductsRaw, ...saleServicesRaw]),
-      serializeHomeItems([...latestProductsRaw, ...latestServicesRaw])
+      serializeHomeItems([...saleProductsRaw, ...saleServicesRaw], req.locale),
+      serializeHomeItems([...latestProductsRaw, ...latestServicesRaw], req.locale)
     ]);
 
     const saleDtos = dedupeDeals(serializedSale.map((item) => normalizeDealDto(item)));
@@ -716,7 +725,7 @@ export const getTopListings = async (req: Request, res: Response) => {
 
     const withWeeklyScore = dedupeListingCards([
       ...products.map((product) => {
-        const dto = toDetailDto(product);
+        const dto = toDetailDto(product, req.locale);
         const weeklyLikes = parseNumber((product as any)?.likes_7d ?? (product as any)?.likes7d);
         const weeklyViews = parseNumber((product as any)?.views_7d ?? (product as any)?.views7d);
         const weeklyOrders = parseNumber((product as any)?.orders_7d ?? (product as any)?.orders7d);
@@ -733,7 +742,7 @@ export const getTopListings = async (req: Request, res: Response) => {
         };
       }),
       ...services.map((service) => {
-        const dto = attachServiceCover(service);
+        const dto = attachServiceCover(service, req.locale);
         const weeklyLikes = parseNumber((service as any)?.likes_7d ?? (service as any)?.likes7d);
         const weeklyViews = parseNumber((service as any)?.views_7d ?? (service as any)?.views7d);
         const weeklyOrders = parseNumber((service as any)?.orders_7d ?? (service as any)?.orders7d);
@@ -770,7 +779,10 @@ export const getLatestListings = async (req: Request, res: Response) => {
   try {
     const limit = Math.min(Math.max(parseInt(String(req.query.limit || "12"), 10) || 12, 1), 50);
     const { products, services } = await fetchListings();
-    const docs = dedupeListingCards([...products.map((p) => toDetailDto(p)), ...services.map((s) => attachServiceCover(s))]).sort(
+    const docs = dedupeListingCards([
+      ...products.map((p) => toDetailDto(p, req.locale)),
+      ...services.map((s) => attachServiceCover(s, req.locale))
+    ]).sort(
       (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
     );
     return res.json({ listings: docs.slice(0, limit) });

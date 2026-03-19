@@ -7,6 +7,7 @@ import { TaxiOrder, TaxiOrderStatus } from "../models/TaxiOrder";
 import { TaxiRide } from "../models/TaxiRide";
 import { parsePositiveInt } from "../utils/pagination";
 import { sendToUser } from "../utils/websocket";
+import { respondAuthRequired } from "../utils/controllerResponses";
 
 const allowedSeatCapacities = [4, 7, 9, 13, 20, 30, 40];
 const defaultCurrency = "UZS";
@@ -105,7 +106,7 @@ function isValidObjectId(value: string) {
 
 export const upsertTaxiProfile = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const { vehicleModel, seatCapacity, taxiClass, features, taxiStatus, payoutAccount } = req.body;
 
     const profile = await AgentProfile.findOne({ user: req.user._id });
@@ -135,7 +136,7 @@ export const upsertTaxiProfile = async (req: Request, res: Response) => {
 
 export const updateTaxiLocation = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const coords = extractCoords(req.body, "location");
     if (!coords) return res.status(400).json({ message: "locationLat/locationLng required" });
 
@@ -213,7 +214,7 @@ export const estimateTaxiFare = async (req: Request, res: Response) => {
 
 export const createTaxiRideRequest = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const pickup = extractCoords(req.body, "pickup");
     if (!pickup) return res.status(400).json({ message: "pickupLat/pickupLng required" });
     const dropoff = extractCoords(req.body, "dropoff");
@@ -260,7 +261,7 @@ export const createTaxiRideRequest = async (req: Request, res: Response) => {
 
 export const listNearbyRideRequests = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const agent = await AgentProfile.findOne({ user: req.user._id, serviceCategory: "taxi" });
     if (!agent) return res.status(404).json({ message: "Taxi profile not found" });
 
@@ -312,7 +313,7 @@ export const listNearbyRideRequests = async (req: Request, res: Response) => {
 
 export const acceptTaxiRide = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const agent = await AgentProfile.findOne({ user: req.user._id, serviceCategory: "taxi" });
     if (!agent) return res.status(404).json({ message: "Taxi profile not found" });
 
@@ -341,7 +342,7 @@ export const acceptTaxiRide = async (req: Request, res: Response) => {
 
 export const confirmTaxiRide = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const ride = await TaxiRide.findOne({ _id: req.params.id, rider: req.user._id });
     if (!ride) return res.status(404).json({ message: "Ride not found" });
     if (ride.status !== "ASSIGNED") {
@@ -370,7 +371,7 @@ export const confirmTaxiRide = async (req: Request, res: Response) => {
 
 export const completeTaxiRide = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const agent = await AgentProfile.findOne({ user: req.user._id, serviceCategory: "taxi" });
     if (!agent) return res.status(404).json({ message: "Taxi profile not found" });
 
@@ -416,7 +417,7 @@ export const completeTaxiRide = async (req: Request, res: Response) => {
 
 export const myTaxiRideRequests = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const rides = await TaxiRide.find({ rider: req.user._id }).sort({ createdAt: -1 });
     return res.json({ rides });
   } catch (err) {
@@ -427,7 +428,7 @@ export const myTaxiRideRequests = async (req: Request, res: Response) => {
 
 export const agentTaxiRides = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const agent = await AgentProfile.findOne({ user: req.user._id, serviceCategory: "taxi" });
     if (!agent) return res.status(404).json({ message: "Taxi profile not found" });
     const rides = await TaxiRide.find({ agent: agent._id }).sort({ createdAt: -1 });
@@ -440,7 +441,7 @@ export const agentTaxiRides = async (req: Request, res: Response) => {
 
 export const taxiDailyEarnings = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const agent = await AgentProfile.findOne({ user: req.user._id, serviceCategory: "taxi" });
     if (!agent) return res.status(404).json({ message: "Taxi profile not found" });
 
@@ -471,7 +472,7 @@ export const taxiDailyEarnings = async (req: Request, res: Response) => {
 
 export const taxiLiveBalance = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const agent = await AgentProfile.findOne({ user: req.user._id, serviceCategory: "taxi" });
     if (!agent) return res.status(404).json({ message: "Taxi profile not found" });
 
@@ -544,7 +545,7 @@ export const taxiListingDetail = async (req: Request, res: Response) => {
 
 export const createTaxiListing = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const languages = normalizeStringArray(req.body.languages);
     const images = normalizeStringArray(req.body.images);
     const options = normalizeStringArray(req.body.options);
@@ -591,7 +592,7 @@ export const createTaxiListing = async (req: Request, res: Response) => {
 
 export const updateTaxiListing = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const { id } = req.params;
     if (!isValidObjectId(id)) {
       return res.status(404).json({ message: "Listing not found" });
@@ -651,7 +652,7 @@ export const updateTaxiListing = async (req: Request, res: Response) => {
 
 export const updateTaxiListingStatus = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const { id } = req.params;
     if (!isValidObjectId(id)) {
       return res.status(404).json({ message: "Listing not found" });
@@ -680,7 +681,7 @@ export const updateTaxiListingStatus = async (req: Request, res: Response) => {
 
 export const createTaxiOrder = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const { listingId, pickup, dropoff, rideTime, note } = req.body;
 
     if (!listingId || !isValidObjectId(listingId)) {
@@ -720,7 +721,7 @@ export const createTaxiOrder = async (req: Request, res: Response) => {
 
 export const myTaxiOrders = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const orders = await TaxiOrder.find({ customerId: req.user._id }).sort({ createdAt: -1 });
     return res.json({ orders });
   } catch (err) {
@@ -731,7 +732,7 @@ export const myTaxiOrders = async (req: Request, res: Response) => {
 
 export const agentTaxiOrders = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const match: Record<string, unknown> = {};
 
     if (req.user.role === "ADMIN") {
@@ -752,7 +753,7 @@ export const agentTaxiOrders = async (req: Request, res: Response) => {
 
 export const updateTaxiOrderStatus = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const { id } = req.params;
     if (!isValidObjectId(id)) {
       return res.status(404).json({ message: "Order not found" });
@@ -793,7 +794,7 @@ export const updateTaxiOrderStatus = async (req: Request, res: Response) => {
 
 export const createTaxiFeedback = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const { listingId, type, message } = req.body;
 
     if (!listingId || !isValidObjectId(listingId)) {

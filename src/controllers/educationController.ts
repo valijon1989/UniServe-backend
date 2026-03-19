@@ -1,41 +1,36 @@
 import { Request, Response } from "express";
-import { isValidObjectId, PipelineStage } from "mongoose";
+import { isValidObjectId } from "mongoose";
 import { AgentProfile } from "../models/AgentProfile";
 import { User } from "../models/User";
 import { EducationListing } from "../models/EducationListing";
+import { buildCategoryMeta, listMarketplaceSections, normalizeMarketplaceCategory } from "../services/categoryTaxonomy";
+import { buildListingUiMeta } from "../services/sharedFilters";
+import { t } from "../i18n";
 import { parsePositiveInt } from "../utils/pagination";
+import { respondAuthRequired, respondForbidden, respondServerError } from "../utils/controllerResponses";
 
-const educationCategories = [
-  {
-    key: "language",
-    name: "Til o'rganish",
-    items: ["korean", "english", "uzbek", "russian", "spanish", "chinese"]
-  },
-  {
-    key: "skill",
-    name: "Kasb o'rganish",
-    items: ["auto-repair", "welding", "electrician", "cooking", "beauty", "nursing", "plumbing"]
-  },
-  {
-    key: "special",
-    name: "Maxsus bilimlar",
-    items: ["it-programming", "informatics", "trading", "other"]
-  }
-];
+const normalizeText = (value: unknown) => String(value || "").trim();
+const normalizeCourseCategory = (value: unknown) => normalizeMarketplaceCategory(value, "courses");
+const isValidCourseCategory = (value: unknown) => Boolean(buildCategoryMeta(value, undefined, "courses"));
 
-const allowedSubcategories = new Set(
-  educationCategories.flatMap((category) => category.items)
-);
-
-const isSubcategoryAllowedForCategory = (category: string, subcategory: string) => {
-  const entry = educationCategories.find((item) => item.key === category);
-  return !!entry?.items.includes(subcategory);
-};
+const toEducationListingDto = (listing: any, locale: Request["locale"], agentProfile?: any | null, agentUser?: any | null) => ({
+  ...listing,
+  category: normalizeCourseCategory(listing.category) || normalizeText(listing.category),
+  categoryMeta: buildCategoryMeta(listing.category, locale, "courses"),
+  subcategoryLabel: normalizeText(listing.subcategory) || null,
+  agent:
+    agentProfile || agentUser
+      ? {
+          profile: agentProfile || null,
+          user: agentUser || null
+        }
+      : undefined
+});
 
 const buildListMatch = (query: Request["query"]) => {
   const match: Record<string, any> = { status: "active" };
   if (typeof query.category === "string") {
-    match.category = query.category;
+    match.category = normalizeCourseCategory(query.category) || normalizeText(query.category);
   }
   if (typeof query.subcategory === "string") {
     match.subcategory = query.subcategory;
@@ -55,16 +50,17 @@ const buildListMatch = (query: Request["query"]) => {
   return match;
 };
 
-export const getEducationCategories = async (_req: Request, res: Response) => {
-  return res.json({ categories: educationCategories });
+export const getEducationCategories = async (req: Request, res: Response) => {
+  const [courses] = listMarketplaceSections(["courses"], req.locale);
+  return res.json({ categories: courses?.subcategories || [] });
 };
 
 export const createEducationListing = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const profile = await AgentProfile.findOne({ user: req.user._id });
     if (!profile || profile.serviceCategory !== "education") {
-      return res.status(403).json({ message: "Only education agents can create listings" });
+      return res.status(403).json({ message: t(req, "education.access.agent_required.message") });
     }
 
     const {
@@ -87,33 +83,31 @@ export const createEducationListing = async (req: Request, res: Response) => {
     } = req.body;
 
     if (!title || !category || !subcategory || !description || !format) {
-      return res.status(400).json({ message: "title, category, subcategory, description, format required" });
+      return res.status(400).json({ message: t(req, "education.validation.required_fields.message") });
     }
-    if (!allowedSubcategories.has(subcategory)) {
-      return res.status(400).json({ message: "Invalid subcategory" });
-    }
-    if (!isSubcategoryAllowedForCategory(category, subcategory)) {
-      return res.status(400).json({ message: "Subcategory does not match category" });
+    const normalizedCategory = normalizeCourseCategory(category);
+    if (!normalizedCategory || !isValidCourseCategory(normalizedCategory)) {
+      return res.status(400).json({ message: t(req, "education.validation.invalid_category.message") });
     }
     if (format === "online") {
       if (!onlineSchedule?.days?.length || !onlineSchedule?.time || !onlineSchedule?.durationMinutes) {
-        return res.status(400).json({ message: "Online schedule requires days, time, durationMinutes" });
+        return res.status(400).json({ message: t(req, "education.validation.online_schedule_required.message") });
       }
     }
     if (format === "offline") {
       if (!offlineLocation?.address || !offlineLocation?.schedule) {
-        return res.status(400).json({ message: "Offline location requires address and schedule" });
+        return res.status(400).json({ message: t(req, "education.validation.offline_location_required.message") });
       }
     }
     if (!Array.isArray(images) || images.length === 0) {
-      return res.status(400).json({ message: "At least one image is required" });
+      return res.status(400).json({ message: t(req, "education.validation.images_required.message") });
     }
 
     const listing = await EducationListing.create({
       agentId: req.user._id,
       title,
-      category,
-      subcategory,
+      category: normalizedCategory,
+      subcategory: normalizeText(subcategory),
       description,
       weeklyHours,
       weeklyDays,
@@ -129,10 +123,10 @@ export const createEducationListing = async (req: Request, res: Response) => {
       studentsCount: Number.isFinite(Number(studentsCount)) ? Number(studentsCount) : 0
     });
 
-    return res.status(201).json({ listing });
+    return res.status(201).json({ listing: toEducationListingDto(listing.toObject(), req.locale) });
   } catch (err) {
     console.error("createEducationListing error", err);
-    return res.status(500).json({ message: "Server error" });
+    return respondServerError(req, res);
   }
 };
 
@@ -140,58 +134,74 @@ export const listEducationListings = async (req: Request, res: Response) => {
   try {
     const page = parsePositiveInt(req.query.page, 1, 1000000);
     const limit = parsePositiveInt(req.query.limit, 12, 50);
-    const skip = (page - 1) * limit;
     const match = buildListMatch(req.query);
 
-    const sortMode = typeof req.query.sort === "string" ? req.query.sort : "new";
-    const sortStage: PipelineStage.Sort["$sort"] =
-      sortMode === "rating"
-        ? { agentRating: -1, createdAt: -1 }
-        : { createdAt: -1 };
+    const sortMode = typeof req.query.sort === "string" ? req.query.sort : "newest";
 
-    const [items, total] = await Promise.all([
-      EducationListing.aggregate([
-        { $match: match },
-        {
-          $lookup: {
-            from: "agentprofiles",
-            localField: "agentId",
-            foreignField: "user",
-            as: "agentProfile"
-          }
-        },
-        { $unwind: { path: "$agentProfile", preserveNullAndEmptyArrays: true } },
-        {
-          $lookup: {
-            from: "users",
-            localField: "agentId",
-            foreignField: "_id",
-            as: "agentUser"
-          }
-        },
-        { $unwind: { path: "$agentUser", preserveNullAndEmptyArrays: true } },
-        { $addFields: { agentRating: { $ifNull: ["$agentProfile.rating", 0] } } },
-        { $sort: sortStage },
-        { $skip: skip },
-        { $limit: limit }
-      ]),
-      EducationListing.countDocuments(match)
+    const items = await EducationListing.aggregate([
+      { $match: match },
+      {
+        $lookup: {
+          from: "agentprofiles",
+          localField: "agentId",
+          foreignField: "user",
+          as: "agentProfile"
+        }
+      },
+      { $unwind: { path: "$agentProfile", preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: "users",
+          localField: "agentId",
+          foreignField: "_id",
+          as: "agentUser"
+        }
+      },
+      { $unwind: { path: "$agentUser", preserveNullAndEmptyArrays: true } },
+      { $addFields: { agentRating: { $ifNull: ["$agentProfile.rating", 0] } } }
     ]);
 
-    return res.json({ items, total, page, limit });
+    const certificate = normalizeText(req.query.certificate).toLowerCase();
+    const filteredItems = items
+      .filter((item) => {
+        if (!certificate) return true;
+        return (item.certificates || []).some((value: unknown) => normalizeText(value).toLowerCase().includes(certificate));
+      })
+      .sort((left, right) => {
+        if (sortMode === "rating") return Number(right.agentRating || 0) - Number(left.agentRating || 0);
+        return new Date(String(right.createdAt || 0)).getTime() - new Date(String(left.createdAt || 0)).getTime();
+      });
+
+    const total = filteredItems.length;
+    const skip = (page - 1) * limit;
+    const pagedItems = filteredItems.slice(skip, skip + limit);
+
+    return res.json({
+      items: pagedItems.map((item) => toEducationListingDto(item, req.locale, item.agentProfile, item.agentUser)),
+      total,
+      page,
+      limit,
+      uiMeta: buildListingUiMeta(req, "courses", {
+        categoryKey: normalizeCourseCategory(req.query.category) || null,
+        resultCount: total,
+        sortValue: sortMode
+      })
+    });
   } catch (err) {
     console.error("listEducationListings error", err);
-    return res.status(500).json({ message: "Server error" });
+    return respondServerError(req, res);
   }
 };
 
 export const getEducationListingDetail = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    if (!isValidObjectId(id)) return res.status(400).json({ message: "Invalid listing id" });
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ message: t(req, "education.validation.invalid_listing_id.message") });
+    }
     const listing = await EducationListing.findById(id).lean();
     if (!listing || listing.status !== "active") {
-      return res.status(404).json({ message: "Listing not found" });
+      return res.status(404).json({ message: t(req, "education.lookup.listing_not_found.message") });
     }
     const [agentProfile, agentUser] = await Promise.all([
       AgentProfile.findOne({ user: listing.agentId }).lean(),
@@ -199,38 +209,36 @@ export const getEducationListingDetail = async (req: Request, res: Response) => 
     ]);
 
     return res.json({
-      listing,
-      agent: {
-        profile: agentProfile,
-        user: agentUser || null
-      }
+      listing: toEducationListingDto(listing, req.locale, agentProfile, agentUser || null)
     });
   } catch (err) {
     console.error("getEducationListingDetail error", err);
-    return res.status(500).json({ message: "Server error" });
+    return respondServerError(req, res);
   }
 };
 
 export const myEducationListings = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
-    const listings = await EducationListing.find({ agentId: req.user._id }).sort({ createdAt: -1 });
-    return res.json({ listings });
+    if (!req.user) return respondAuthRequired(req, res);
+    const listings = await EducationListing.find({ agentId: req.user._id }).sort({ createdAt: -1 }).lean();
+    return res.json({ listings: listings.map((listing) => toEducationListingDto(listing, req.locale)) });
   } catch (err) {
     console.error("myEducationListings error", err);
-    return res.status(500).json({ message: "Server error" });
+    return respondServerError(req, res);
   }
 };
 
 export const updateEducationListing = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const { id } = req.params;
-    if (!isValidObjectId(id)) return res.status(400).json({ message: "Invalid listing id" });
+    if (!isValidObjectId(id)) {
+      return res.status(400).json({ message: t(req, "education.validation.invalid_listing_id.message") });
+    }
     const listing = await EducationListing.findById(id);
-    if (!listing) return res.status(404).json({ message: "Listing not found" });
+    if (!listing) return res.status(404).json({ message: t(req, "education.lookup.listing_not_found.message") });
     if (listing.agentId.toString() !== req.user._id) {
-      return res.status(403).json({ message: "Forbidden" });
+      return respondForbidden(req, res);
     }
 
     const allowedFields = [
@@ -259,30 +267,30 @@ export const updateEducationListing = async (req: Request, res: Response) => {
       }
     }
 
-    if (listing.subcategory && !allowedSubcategories.has(listing.subcategory)) {
-      return res.status(400).json({ message: "Invalid subcategory" });
+    if (listing.category) {
+      listing.category = normalizeCourseCategory(listing.category) || listing.category;
     }
-    if (listing.category && listing.subcategory && !isSubcategoryAllowedForCategory(listing.category, listing.subcategory)) {
-      return res.status(400).json({ message: "Subcategory does not match category" });
+    if (!listing.category || !isValidCourseCategory(listing.category)) {
+      return res.status(400).json({ message: t(req, "education.validation.invalid_category.message") });
     }
     if (listing.format === "online") {
       if (!listing.onlineSchedule?.days?.length || !listing.onlineSchedule?.time || !listing.onlineSchedule?.durationMinutes) {
-        return res.status(400).json({ message: "Online schedule requires days, time, durationMinutes" });
+        return res.status(400).json({ message: t(req, "education.validation.online_schedule_required.message") });
       }
     }
     if (listing.format === "offline") {
       if (!listing.offlineLocation?.address || !listing.offlineLocation?.schedule) {
-        return res.status(400).json({ message: "Offline location requires address and schedule" });
+        return res.status(400).json({ message: t(req, "education.validation.offline_location_required.message") });
       }
     }
     if (!listing.images?.length) {
-      return res.status(400).json({ message: "At least one image is required" });
+      return res.status(400).json({ message: t(req, "education.validation.images_required.message") });
     }
 
     await listing.save();
-    return res.json({ listing });
+    return res.json({ listing: toEducationListingDto(listing.toObject(), req.locale) });
   } catch (err) {
     console.error("updateEducationListing error", err);
-    return res.status(500).json({ message: "Server error" });
+    return respondServerError(req, res);
   }
 };

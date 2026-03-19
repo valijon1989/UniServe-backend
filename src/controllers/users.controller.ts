@@ -6,6 +6,8 @@ import { sanitizeUser } from "../utils/userSanitizer";
 import { ensureAbsoluteUrl } from "../utils/imageHelpers";
 import { resolveAvatarUrl } from "../utils/avatarImage";
 import { avatarUploadDir } from "../middlewares/uploadAvatar";
+import { t } from "../i18n";
+import { respondAuthRequired } from "../utils/controllerResponses";
 
 const USERNAME_REGEX = /^[a-z0-9._-]{3,30}$/;
 const AVATAR_PUBLIC_PREFIX = "/api/media/avatars/";
@@ -55,24 +57,24 @@ const removeAvatarByFilename = async (filename: string | null) => {
 
 export const getCurrentUserProfile = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const user = await User.findById(req.user._id).lean();
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) return res.status(404).json({ message: t(req, "users.profile.lookup.not_found.message") });
     return res.json({ user: toSafeUser(user) });
   } catch (err) {
     console.error("getCurrentUserProfile error", err);
-    return res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: t(req, "common.errors.server.message") });
   }
 };
 
 export const updateCurrentUserProfile = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
 
     if (Object.prototype.hasOwnProperty.call(req.body || {}, "avatarUrl")) {
       return res
         .status(400)
-        .json({ message: "avatarUrl can only be updated via POST /api/users/me/avatar" });
+        .json({ message: t(req, "users.profile.validation.avatar_direct_update.message") });
     }
 
     const { name, bio, isPrivate, username, displayName } = req.body ?? {};
@@ -80,82 +82,82 @@ export const updateCurrentUserProfile = async (req: Request, res: Response) => {
 
     if (name !== undefined) {
       if (typeof name !== "string" || !name.trim()) {
-        return res.status(400).json({ message: "name must be a non-empty string" });
+        return res.status(400).json({ message: t(req, "users.profile.validation.name_required.message") });
       }
       updates.name = name.trim();
     }
 
     if (displayName !== undefined) {
       if (typeof displayName !== "string") {
-        return res.status(400).json({ message: "displayName must be a string" });
+        return res.status(400).json({ message: t(req, "users.profile.validation.display_name_string.message") });
       }
       updates.displayName = displayName.trim();
     }
 
     if (bio !== undefined) {
       if (typeof bio !== "string") {
-        return res.status(400).json({ message: "bio must be a string" });
+        return res.status(400).json({ message: t(req, "users.profile.validation.bio_string.message") });
       }
       updates.bio = bio.trim();
     }
 
     if (isPrivate !== undefined) {
       if (typeof isPrivate !== "boolean") {
-        return res.status(400).json({ message: "isPrivate must be boolean" });
+        return res.status(400).json({ message: t(req, "users.profile.validation.is_private_boolean.message") });
       }
       updates.isPrivate = isPrivate;
     }
 
     if (username !== undefined) {
       if (typeof username !== "string") {
-        return res.status(400).json({ message: "username must be a string" });
+        return res.status(400).json({ message: t(req, "users.profile.validation.username_string.message") });
       }
       const normalizedUsername = username.trim().toLowerCase();
       if (!USERNAME_REGEX.test(normalizedUsername)) {
-        return res.status(400).json({ message: "username must be 3-30 chars and contain only a-z, 0-9, ., _, -" });
+          return res.status(400).json({ message: t(req, "users.profile.validation.username_format.message") });
       }
 
       const exists = await User.exists({
         username: normalizedUsername,
         _id: { $ne: req.user._id }
       });
-      if (exists) return res.status(409).json({ message: "Username already taken" });
+      if (exists) return res.status(409).json({ message: t(req, "users.profile.validation.username_taken.message") });
       updates.username = normalizedUsername;
     }
 
     if (Object.keys(updates).length === 0) {
-      return res.status(400).json({ message: "No valid fields to update" });
+      return res.status(400).json({ message: t(req, "users.profile.validation.no_fields.message") });
     }
 
     const user = await User.findByIdAndUpdate(req.user._id, updates, {
       new: true,
       runValidators: true
     }).lean();
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) return res.status(404).json({ message: t(req, "users.profile.lookup.not_found.message") });
 
     return res.json({ user: toSafeUser(user) });
   } catch (err: any) {
     if (err?.code === 11000) {
-      return res.status(409).json({ message: "Username already taken" });
+      return res.status(409).json({ message: t(req, "users.profile.validation.username_taken.message") });
     }
     console.error("updateCurrentUserProfile error", err);
-    return res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: t(req, "common.errors.server.message") });
   }
 };
 
 export const uploadCurrentUserAvatar = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
 
     const file = req.file as any;
     if (!file?.filename || typeof file.filename !== "string") {
-      return res.status(400).json({ message: "avatar image is required" });
+      return res.status(400).json({ message: t(req, "users.profile.validation.avatar_required.message") });
     }
 
     const user = await User.findById(req.user._id);
     if (!user) {
       await removeAvatarByFilename(file.filename);
-      return res.status(404).json({ message: "User not found" });
+      return res.status(404).json({ message: t(req, "users.profile.lookup.not_found.message") });
     }
 
     const previousFilename = extractAvatarFilename(user.avatarUrl);
@@ -174,6 +176,6 @@ export const uploadCurrentUserAvatar = async (req: Request, res: Response) => {
     });
   } catch (err) {
     console.error("uploadCurrentUserAvatar error", err);
-    return res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: t(req, "common.errors.server.message") });
   }
 };

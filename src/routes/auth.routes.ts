@@ -11,6 +11,7 @@ import {
   resetPassword
 } from "../controllers/auth.controller";
 import { requireAuth } from "../middlewares/requireAuth";
+import { respondRateLimited } from "../utils/controllerResponses";
 
 const toNumber = (value: string | undefined, fallback: number) => {
   const parsed = Number(value);
@@ -22,7 +23,7 @@ const loginLimiter = rateLimit({
   max: toNumber(process.env.LOGIN_RATE_LIMIT_MAX, 10),
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  message: { message: "Too many requests. Please try again later." }
+  handler: (req, res) => respondRateLimited(req, res)
 });
 
 const recoveryLimiter = rateLimit({
@@ -30,7 +31,7 @@ const recoveryLimiter = rateLimit({
   max: toNumber(process.env.RECOVERY_RATE_LIMIT_MAX, 10),
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  message: { message: "Too many requests. Please try again later." }
+  handler: (req, res) => respondRateLimited(req, res)
 });
 
 const router = Router();

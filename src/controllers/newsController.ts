@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import mongoose from "mongoose";
 import { Post } from "../models/Post";
 import { User } from "../models/User";
+import { respondAuthRequired } from "../utils/controllerResponses";
 
 const slugifyText = (value: string) => {
   return value
@@ -168,7 +169,7 @@ export const getNewsDetail = async (req: Request, res: Response) => {
 
 export const createNews = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const user = await User.findById(req.user._id);
     if (!user) return res.status(401).json({ message: "User not found" });
 
@@ -266,7 +267,7 @@ export const createNews = async (req: Request, res: Response) => {
 
 export const reportNews = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const { slug } = req.params;
     const news = await Post.findOne(
       mongoose.isValidObjectId(slug) ? { _id: slug } : { slug }

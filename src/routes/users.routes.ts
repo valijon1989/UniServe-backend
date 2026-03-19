@@ -6,6 +6,7 @@ import {
   updateCurrentUserProfile,
   uploadCurrentUserAvatar
 } from "../controllers/users.controller";
+import { t } from "../i18n";
 
 const router = Router();
 
@@ -14,14 +15,20 @@ const avatarUploadHandler = (req: Request, res: Response, next: NextFunction) =>
     if (!err) return next();
 
     if (err?.code === "LIMIT_FILE_SIZE") {
-      return res.status(400).json({ message: "Avatar image must be 5MB or smaller" });
+      return res.status(400).json({ message: t(req, "users.profile.validation.avatar_too_large.message") });
     }
 
     if (err?.code === "LIMIT_UNEXPECTED_FILE") {
-      return res.status(400).json({ message: "Upload field must be named avatar" });
+      return res.status(400).json({ message: t(req, "users.profile.validation.avatar_field_name.message") });
     }
 
-    return res.status(400).json({ message: err?.message || "Invalid avatar upload" });
+    if (err?.code === "AVATAR_INVALID_TYPE") {
+      return res.status(400).json({ message: t(req, "users.profile.validation.avatar_invalid_upload.message") });
+    }
+
+    return res
+      .status(400)
+      .json({ message: t(req, "users.profile.validation.avatar_invalid_upload.message") });
   });
 };
 

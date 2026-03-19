@@ -8,6 +8,12 @@ import { Comment } from "../models/Comment";
 import { User } from "../models/User";
 import { ensureAbsoluteUrl } from "../utils/imageHelpers";
 import { resolveAvatarUrl } from "../utils/avatarImage";
+import {
+  getCategoryDisplay,
+  getPostTypeLabel,
+  resolveLocalizedTextField
+} from "../services/localizedContent";
+import { respondAuthRequired } from "../utils/controllerResponses";
 
 const createPostSchema = z.object({
   text: z.string().trim().max(5000).optional(),
@@ -82,20 +88,28 @@ const toAuthorDto = (author: any) => {
 export const formatPost = (post: any, options?: any) => {
   const safeOptions = options && typeof options === "object" && !Array.isArray(options) ? options : {};
   const raw = post?.toObject ? post.toObject() : post;
+  const locale = safeOptions.locale as Request["locale"] | undefined;
   const media = Array.isArray(raw?.media) ? raw.media : [];
   const images = media.filter((item: any) => item?.type === "image").map((item: any) => item.url);
   const videos = media.filter((item: any) => item?.type === "video").map((item: any) => item.url);
   const likeCount =
     typeof raw?.likeCount === "number" ? raw.likeCount : Array.isArray(raw?.likes) ? raw.likes.length : 0;
+  const categoryLabel = getCategoryDisplay(raw?.category, locale).label;
+  const typeLabel = getPostTypeLabel(raw?.type || "post", locale);
 
   return {
     _id: String(raw?._id || ""),
     slug: raw?.slug || undefined,
-    text: raw?.text || raw?.content || raw?.excerpt || "",
-    title: raw?.title || "",
+    text:
+      resolveLocalizedTextField(raw, "text", locale, "") ||
+      resolveLocalizedTextField(raw, "content", locale, "") ||
+      resolveLocalizedTextField(raw, "excerpt", locale, ""),
+    title: resolveLocalizedTextField(raw, "title", locale, raw?.title || ""),
     linkUrl: raw?.linkUrl || raw?.sourceUrl || undefined,
     category: raw?.category || "social",
+    categoryLabel,
     type: raw?.type || "social",
+    typeLabel,
     media: media.map((item: any) => ({
       url: item.url,
       type: item.type,
@@ -230,7 +244,8 @@ export const listPosts = async (req: Request, res: Response) => {
       formatPost(post, {
         author: authorMap.get(String(post.authorId || post.author || "")),
         currentUserId: req.user?._id,
-        reaction: reactionMap.get(String(post._id)) || null
+        reaction: reactionMap.get(String(post._id)) || null,
+        locale: req.locale
       })
     );
 
@@ -243,7 +258,7 @@ export const listPosts = async (req: Request, res: Response) => {
 
 export const createPost = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
 
     const parsed = createPostSchema.safeParse(req.body || {});
     if (!parsed.success) {
@@ -302,7 +317,7 @@ export const createPost = async (req: Request, res: Response) => {
     });
 
     const author = await User.findById(req.user._id, { username: 1, name: 1, avatarUrl: 1 }).lean();
-    return res.status(201).json({ post: formatPost(post, { author, currentUserId: req.user._id, reaction: null }) });
+    return res.status(201).json({ post: formatPost(post, { author, currentUserId: req.user._id, reaction: null, locale: req.locale }) });
   } catch (err) {
     console.error("createPost error", err);
     return res.status(500).json({ message: "Server error" });
@@ -328,7 +343,8 @@ export const getPostByIdOrSlug = async (req: Request, res: Response) => {
       post: formatPost(post, {
         author,
         currentUserId: req.user?._id,
-        reaction: (reaction?.value as ReactionValue | undefined) || null
+        reaction: (reaction?.value as ReactionValue | undefined) || null,
+        locale: req.locale
       })
     });
   } catch (err) {
@@ -339,7 +355,7 @@ export const getPostByIdOrSlug = async (req: Request, res: Response) => {
 
 const toggleReaction = async (req: Request, res: Response, targetValue: ReactionValue) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
 
     const id = req.params.id;
     const post = await findPostByIdOrSlug(id);
@@ -369,7 +385,7 @@ const toggleReaction = async (req: Request, res: Response, targetValue: Reaction
       reaction,
       likeCount: stats.likeCount,
       dislikeCount: stats.dislikeCount,
-      post: updated ? formatPost(updated, { author, currentUserId: req.user._id, reaction }) : undefined
+      post: updated ? formatPost(updated, { author, currentUserId: req.user._id, reaction, locale: req.locale }) : undefined
     });
   } catch (err) {
     console.error("toggleReaction error", err);
@@ -383,7 +399,7 @@ export const dislikePost = async (req: Request, res: Response) => toggleReaction
 
 export const sharePost = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const id = req.params.id;
     const post = await findPostByIdOrSlug(id);
     if (!post) return res.status(404).json({ message: "Post not found" });
@@ -450,7 +466,7 @@ export const listPostComments = async (req: Request, res: Response) => {
 
 export const createPostComment = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const parsed = commentSchema.safeParse(req.body || {});
     if (!parsed.success) {
       return res.status(400).json({
@@ -526,7 +542,7 @@ export const topDiscussions = async (req: Request, res: Response) => {
     const authorMap = await getAuthorMap(items);
 
     return res.json({
-      items: items.map((post) => formatPost(post, { author: authorMap.get(String(post.authorId || post.author || "")) })),
+      items: items.map((post) => formatPost(post, { author: authorMap.get(String(post.authorId || post.author || "")), locale: req.locale })),
       page,
       limit,
       total
@@ -543,7 +559,7 @@ export const getPostDetail = getPostByIdOrSlug;
 export const commentPost = createPostComment;
 export const reportPost = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const post = await findPostByIdOrSlug(req.params.id);
     if (!post) return res.status(404).json({ message: "Post not found" });
 
@@ -555,7 +571,7 @@ export const reportPost = async (req: Request, res: Response) => {
     }
 
     const updated = await Post.findByIdAndUpdate(post._id, { $set: updatePayload }, { new: true }).lean();
-    return res.json({ post: updated ? formatPost(updated) : undefined });
+    return res.json({ post: updated ? formatPost(updated, { locale: req.locale }) : undefined });
   } catch (err) {
     console.error("reportPost error", err);
     return res.status(500).json({ message: "Server error" });
@@ -564,7 +580,7 @@ export const reportPost = async (req: Request, res: Response) => {
 
 export const markBestAnswer = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const commentId = String(req.body?.commentId || "").trim();
     if (!commentId) return res.status(400).json({ message: "commentId required" });
 
@@ -585,7 +601,7 @@ export const markBestAnswer = async (req: Request, res: Response) => {
     }));
     await postDoc.save();
 
-    return res.json({ post: formatPost(postDoc) });
+    return res.json({ post: formatPost(postDoc, { locale: req.locale }) });
   } catch (err) {
     console.error("markBestAnswer error", err);
     return res.status(500).json({ message: "Server error" });

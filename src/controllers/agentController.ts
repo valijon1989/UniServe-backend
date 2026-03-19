@@ -5,10 +5,23 @@ import { User } from "../models/User";
 import { AgentReview } from "../models/AgentReview";
 import { Product } from "../models/Product";
 import { Service } from "../models/Service";
+import { Order } from "../models/Order";
+import { ServiceOrder } from "../models/ServiceOrder";
+import { Payment } from "../models/Payment";
+import { PayoutRequest } from "../models/PayoutRequest";
 import { parsePositiveInt } from "../utils/pagination";
 import { resolveAvatarUrl } from "../utils/avatarImage";
 import { resolveCoverImage, sanitizeImageArray } from "../utils/resolveCoverImage";
 import { sanitizeUser } from "../utils/userSanitizer";
+import { buildCategoryMeta, listMarketplaceSections } from "../services/categoryTaxonomy";
+import {
+  getAgentKindLabel,
+  resolveLocalizedTextField
+} from "../services/localizedContent";
+import { resolveAgentVerificationStatus } from "../services/agentVerification";
+import { toDetailDto } from "./productController";
+import { attachServiceCover } from "./serviceController";
+import { respondAuthRequired } from "../utils/controllerResponses";
 
 const allowedSeatCapacities = [4, 7, 9, 13, 20, 30, 40];
 const constructionAreas = ["interior", "exterior"];
@@ -107,13 +120,37 @@ const normalizeSlugArray = (value: unknown) => {
   return Array.from(new Set(normalized));
 };
 
-export const getAgentTypes = async (_req: Request, res: Response) => {
+const normalizeText = (value: unknown): string => String(value || "").trim();
+
+const buildAgentVerificationPayload = (profile: any) => ({
+  status: resolveAgentVerificationStatus(profile),
+  phone: profile?.phone || null,
+  email: profile?.verificationEmail || null,
+  homeAddress: profile?.verificationHomeAddress || null,
+  document: profile?.verificationDocument || null,
+  faceId: profile?.verificationFaceId || null,
+  requestedAt: profile?.verificationRequestedAt || null,
+  reviewedAt: profile?.verificationReviewedAt || null,
+  rejectionReason: profile?.verificationRejectionReason || null
+});
+
+export const getAgentTypes = async (req: Request, res: Response) => {
+  const serviceSections = listMarketplaceSections(["services", "courses", "consulting", "digital_services"], req.locale);
   return res.json({
     kinds: [
-      { value: "SERVICE", label: "Service Agent" },
-      { value: "SELLER", label: "Seller Agent" }
+      { value: "SERVICE", label: getAgentKindLabel("SERVICE", req.locale) },
+      { value: "SELLER", label: getAgentKindLabel("SELLER", req.locale) }
     ],
     categories: supportedServiceCategories,
+    categoryOptions: serviceSections.flatMap((section) =>
+      section.subcategories.map((subcategory) => ({
+        value: subcategory.slug,
+        label: subcategory.displayName,
+        localizedName: subcategory.name,
+        route: subcategory.route,
+        mainCategory: section.slug
+      }))
+    ),
     defaults: {
       kind: "SERVICE"
     },
@@ -127,7 +164,7 @@ export const getAgentTypes = async (_req: Request, res: Response) => {
 
 export const becomeAgent = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const {
       kind,
       socialServices,
@@ -227,7 +264,7 @@ export const becomeAgent = async (req: Request, res: Response) => {
 
 export const updateMyAgentType = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
 
     const profile = await AgentProfile.findOne({ user: req.user._id });
     if (!profile) {
@@ -338,7 +375,7 @@ export const updateMyAgentType = async (req: Request, res: Response) => {
 
 export const verifyFaceId = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const profile = await AgentProfile.findOneAndUpdate(
       { user: req.user._id },
       { faceIdVerified: true },
@@ -352,9 +389,129 @@ export const verifyFaceId = async (req: Request, res: Response) => {
   }
 };
 
+export const requestAgentVerification = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) return respondAuthRequired(req, res);
+
+    const profile = await AgentProfile.findOne({ user: req.user._id });
+    if (!profile) return res.status(404).json({ message: "Agent profile not found" });
+
+    const phone = normalizeText(req.body.phone || req.body.phoneNumber);
+    const email = normalizeText(req.body.mail || req.body.email);
+    const faceId = normalizeText(req.body.faceId || req.body.face_id);
+    const document = normalizeText(req.body.document || req.body.doc || req.body.hujjat);
+    const homeAddress = normalizeText(
+      req.body.homeAddress || req.body.home_address || req.body.address || req.body.uyManzili
+    );
+
+    if (!phone || !email || !faceId || !document || !homeAddress) {
+      return res.status(400).json({ message: "phone, mail, faceId, document and homeAddress are required" });
+    }
+
+    profile.phone = phone;
+    profile.verificationEmail = email.toLowerCase();
+    profile.verificationFaceId = faceId;
+    profile.verificationDocument = document;
+    profile.verificationHomeAddress = homeAddress;
+    profile.verificationRequestedAt = new Date();
+    profile.verificationReviewedAt = null;
+    profile.verificationRejectionReason = null;
+    if (!profile.verifiedByAdmin) {
+      profile.adminStatus = "PENDING";
+    }
+
+    await profile.save();
+
+    return res.status(201).json({ verification: buildAgentVerificationPayload(profile) });
+  } catch (err) {
+    console.error("requestAgentVerification error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const getAgentVerificationStatus = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) return respondAuthRequired(req, res);
+
+    const profile = await AgentProfile.findOne({ user: req.user._id }).lean();
+    if (!profile) return res.status(404).json({ message: "Agent profile not found" });
+
+    return res.json({ verification: buildAgentVerificationPayload(profile) });
+  } catch (err) {
+    console.error("getAgentVerificationStatus error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+export const getAgentDashboard = async (req: Request, res: Response) => {
+  try {
+    if (!req.user) return respondAuthRequired(req, res);
+
+    const sellerId = req.user._id;
+    const activeOrderStates = [
+      "held_in_escrow",
+      "fulfillment_started",
+      "delivered_or_completed",
+      "awaiting_buyer_confirmation",
+      "dispute_opened",
+      "under_admin_review"
+    ];
+
+    const [profile, productOrders, serviceOrders, payments, payoutRequests] = await Promise.all([
+      AgentProfile.findOne({ user: sellerId }).lean(),
+      Order.countDocuments({
+        $or: [{ agentId: sellerId }, { "items.sellerId": sellerId }],
+        lifecycleState: { $in: activeOrderStates }
+      }),
+      ServiceOrder.countDocuments({ agentId: sellerId, lifecycleState: { $in: activeOrderStates } }),
+      Payment.find({ sellerId }).select("sellerPendingPayoutAmount workflowStatus").lean(),
+      PayoutRequest.find({
+        sellerId,
+        status: { $in: ["PENDING", "ON_HOLD", "UNDER_REVIEW", "APPROVED", "PROCESSING"] }
+      })
+        .select("amount status currency")
+        .lean()
+    ]);
+
+    if (!profile) return res.status(404).json({ message: "Agent profile not found" });
+
+    const available = payments
+      .filter((item) => item.workflowStatus === "RELEASED_TO_AGENT")
+      .reduce((sum, item) => sum + Number(item.sellerPendingPayoutAmount || 0), 0);
+    const requested = payoutRequests
+      .filter((item) => ["PENDING", "APPROVED", "PROCESSING"].includes(String(item.status)))
+      .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const held = payoutRequests
+      .filter((item) => ["ON_HOLD", "UNDER_REVIEW"].includes(String(item.status)))
+      .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+
+    return res.json({
+      activeJobs: {
+        productOrders,
+        serviceOrders,
+        total: Number(productOrders || 0) + Number(serviceOrders || 0)
+      },
+      rating: {
+        average: Number(profile.rating || 0),
+        count: Number(profile.ratingCount || 0)
+      },
+      payouts: {
+        available,
+        held,
+        requested,
+        currency: payoutRequests[0]?.currency || "USD"
+      },
+      verification: buildAgentVerificationPayload(profile)
+    });
+  } catch (err) {
+    console.error("getAgentDashboard error", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
 export const myAgentProfile = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const profile = await AgentProfile.findOne({ user: req.user._id }).populate("user");
     if (!profile) return res.status(404).json({ message: "Agent profile not found" });
     const profileObj = profile.toObject();
@@ -531,6 +688,9 @@ export const listAgents = async (req: Request, res: Response) => {
     const normalizeAgentAvatar = (items: any[]) =>
       items.map((agent) => ({
         ...agent,
+        kindLabel: getAgentKindLabel(agent.kind, req.locale),
+        serviceCategoryMeta: buildCategoryMeta(agent.serviceCategory, req.locale),
+        serviceCategoryLabel: buildCategoryMeta(agent.serviceCategory, req.locale)?.displayName || agent.serviceCategory || null,
         user: agent?.user
           ? {
               ...(sanitizeUser(agent.user) || {}),
@@ -603,25 +763,23 @@ export const getAgentDetail = async (req: Request, res: Response) => {
     ]);
 
     const mapListing = (type: "product" | "service", item: any) => {
+      const dto = type === "product" ? toDetailDto(item, req.locale) : attachServiceCover(item, req.locale);
       const coverImageUrl = resolveCoverImage(item);
       const images = sanitizeImageArray(item.images);
       return {
         _id: item._id,
         type,
-        title: item.title || item.name || "",
-        description: item.description || "",
-        category: item.category || null,
-        price: type === "product" ? Number(item.price || 0) : Number(item.hourlyRate || item.price || 0),
-        currency: item.currency || "USD",
+        title: dto.title,
+        description: dto.description,
+        category: dto.category,
+        categoryMeta: dto.categoryMeta,
+        price: dto.price,
+        currency: dto.currency || "USD",
         coverImageUrl,
         images: coverImageUrl ? [coverImageUrl, ...images.filter((img) => img !== coverImageUrl)].slice(0, 5) : images.slice(0, 5),
-        ratingAvg: Number(item.ratingAvg || 0),
-        ratingCount: Number(item.ratingCount || 0),
-        stats: {
-          likes: Number(item.likes || 0),
-          views: Number(item.views || 0),
-          orders: Number(item.orders || 0)
-        },
+        ratingAvg: Number(dto.ratingAvg || 0),
+        ratingCount: Number(dto.ratingCount || 0),
+        stats: dto.stats,
         createdAt: item.createdAt
       };
     };
@@ -634,10 +792,13 @@ export const getAgentDetail = async (req: Request, res: Response) => {
     return res.json({
       _id: profile._id,
       kind: profile.kind,
+      kindLabel: getAgentKindLabel(profile.kind, req.locale),
       rating: profile.rating ?? 0,
       ratingCount: profile.ratingCount ?? 0,
       verifiedByAdmin: Boolean(profile.verifiedByAdmin),
       serviceCategory: profile.serviceCategory ?? null,
+      serviceCategoryMeta: buildCategoryMeta(profile.serviceCategory, req.locale),
+      serviceCategoryLabel: buildCategoryMeta(profile.serviceCategory, req.locale)?.displayName || profile.serviceCategory || null,
       listingsCount,
       listingsOrders,
       user: {
@@ -645,7 +806,7 @@ export const getAgentDetail = async (req: Request, res: Response) => {
         name: user.name,
         username: user.username,
         avatarUrl: resolveAvatarUrl(user.avatarUrl, user._id),
-        bio: user.bio ?? "",
+        bio: resolveLocalizedTextField(user as any, "bio", req.locale, user.bio ?? ""),
         region: user.region ?? ""
       },
       listings: {
@@ -696,7 +857,7 @@ export const listAgentReviews = async (req: Request, res: Response) => {
 
 export const upsertAgentReview = async (req: Request, res: Response) => {
   try {
-    if (!req.user) return res.status(401).json({ message: "Not authenticated" });
+    if (!req.user) return respondAuthRequired(req, res);
     const { id } = req.params;
     if (!isValidObjectId(id)) return res.status(400).json({ message: "Invalid agent id" });
 

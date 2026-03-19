@@ -14,6 +14,7 @@ const isUserRole = (value: unknown): value is UserRole => value === "USER" || va
 export interface JwtUserPayload {
   _id: string;
   role: UserRole;
+  tokenVersion?: number;
 }
 
 interface AccessTokenPayload extends JwtUserPayload {
@@ -33,7 +34,8 @@ const normalizeUserPayload = (raw: unknown): JwtUserPayload => {
   const id = payload._id;
   const role = payload.role;
   if (typeof id !== "string" || !isUserRole(role)) throw new Error("Invalid token payload");
-  return { _id: id, role };
+  const tokenVersion = typeof payload.tokenVersion === "number" ? payload.tokenVersion : undefined;
+  return { _id: id, role, tokenVersion };
 };
 
 export function durationToMs(value: string): number | undefined {

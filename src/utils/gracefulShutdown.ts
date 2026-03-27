@@ -1,5 +1,5 @@
 import type { Server } from "http";
-import type { WebSocketServer } from "ws";
+import type { Server as SocketIOServer } from "socket.io";
 
 type ClosableServer = Server & {
   closeAllConnections?: () => void;
@@ -8,7 +8,7 @@ type ClosableServer = Server & {
 
 interface GracefulShutdownOptions {
   server: Server;
-  websocketServer?: WebSocketServer;
+  websocketServer?: SocketIOServer;
   shutdownTimeoutMs?: number;
   closeResources?: () => Promise<void>;
 }
@@ -38,17 +38,14 @@ const closeServer = (server: Server) =>
     closable.closeAllConnections?.();
   });
 
-const closeWebsocketServer = (websocketServer?: WebSocketServer) =>
+const closeWebsocketServer = (websocketServer?: SocketIOServer) =>
   new Promise<void>((resolve) => {
     if (!websocketServer) {
       resolve();
       return;
     }
 
-    for (const client of websocketServer.clients) {
-      client.close(1001, "Server shutting down");
-    }
-
+    websocketServer.disconnectSockets(true);
     websocketServer.close(() => resolve());
   });
 

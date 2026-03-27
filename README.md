@@ -1,5 +1,17 @@
 # UniServe Backend
 
+## Socket.IO
+
+Development connection note:
+
+- URL: `http://localhost:5001`
+- Path: `/ws`
+- Client version: `v4`
+- Auth methods:
+  - `Authorization: Bearer <accessToken>`
+  - query `token=<accessToken>`
+  - auth payload `{ "token": "<accessToken>" }`
+
 ## Skriptlar
 
 `coverImageUrl` bo'sh (yoki placeholder bo'lib qolgan) `Product` va `Service` hujjatlarida `images[0]` asosida `coverImageUrl` (va kerak bo'lsa `coverImage`) ni to'ldirish:

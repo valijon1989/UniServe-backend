@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "UniServe marketplace & social platform backend (TypeScript, Express, MongoDB)",
   "main": "dist/server.js",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "start": "node scripts/runServerWithPortCleanup.js start",
     "dev": "node scripts/runServerWithPortCleanup.js dev",
@@ -25,7 +28,6 @@
   },
   "dependencies": {
     "@types/cookie-parser": "^1.4.10",
-    "@types/ws": "^8.18.1",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
@@ -38,7 +40,7 @@
     "mongoose": "^7.8.0",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
-    "ws": "^8.18.3",
+    "socket.io": "^4.8.3",
     "zod": "^4.3.6"
   },
   "devDependencies": {

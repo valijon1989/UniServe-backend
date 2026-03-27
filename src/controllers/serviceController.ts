@@ -22,6 +22,32 @@ const DUPLICATE_GUARD_WINDOW_MS = Number(process.env.DUPLICATE_GUARD_WINDOW_MS |
 const SERVICE_FALLBACK = ensureAbsoluteUrl("/images/fallback-service.png") || "http://localhost:5001/images/fallback-service.png";
 const normalizeText = (value: unknown): string => String(value || "").trim().toLowerCase();
 
+export const normalizeServiceSort = (value: unknown) => {
+  const token = normalizeText(value);
+  if (!token) return "newest";
+  if (token === "new" || token === "newest") return "newest";
+  if (token === "rating" || token === "top_rated" || token === "top-rated") return "top_rated";
+  if (token === "price_low" || token === "price_asc" || token === "price-asc") return "price_asc";
+  if (token === "price_high" || token === "price_desc" || token === "price-desc") return "price_desc";
+  if (token === "popular" || token === "trending" || token === "best_match" || token === "best-match") return "popular";
+  return "newest";
+};
+
+type ServiceQueryShape = Partial<Record<"category" | "subCategory" | "subcategory", unknown>>;
+
+export const resolveServiceCategoryFilter = (query: ServiceQueryShape) => {
+  const subcategory = normalizeMarketplaceCategory(query.subCategory ?? query.subcategory, "services");
+  if (subcategory && subcategory !== "services") return subcategory;
+  const category = normalizeMarketplaceCategory(query.category, "services");
+  if (category && category !== "services") return category;
+  return null;
+};
+
+export const resolveServiceUiCategoryKey = (query: ServiceQueryShape) =>
+  normalizeMarketplaceCategory(query.subCategory ?? query.subcategory ?? query.category, "services") ||
+  normalizeMarketplaceCategory(query.category, "services") ||
+  null;
+
 const buildUniqueServiceSlug = async (title: string) => {
   const base = slugify(title) || "service";
   const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -196,10 +222,12 @@ export const createService = async (req: Request, res: Response) => {
 
 export const listServices = async (req: Request, res: Response) => {
   try {
-    const page = parsePositiveInt(req.query.page, 1, 1000000);
+    const page = parsePositiveInt(req.query.page ?? req.query.cursor, 1, 1000000);
     const limit = parsePositiveInt(req.query.limit, 24, 50);
-    const category = normalizeMarketplaceCategory(req.query.category, "services");
-    const filter: Record<string, unknown> = category ? { category } : {};
+    const categoryFilter = resolveServiceCategoryFilter(req.query as ServiceQueryShape);
+    const uiCategory = resolveServiceUiCategoryKey(req.query as ServiceQueryShape);
+    const filter: Record<string, unknown> = { status: "ACTIVE" };
+    if (categoryFilter) filter.category = categoryFilter;
     const location = normalizeText(req.query.location);
     if (location) filter.location = new RegExp(location, "i");
 
@@ -208,16 +236,29 @@ export const listServices = async (req: Request, res: Response) => {
       .populate("createdBy", "name username role avatarUrl")
       .lean();
 
-    const ratingMin = Number(req.query.rating || 0);
+    const ratingMin = Number(req.query.rating ?? req.query.minRating ?? 0);
     const minPrice = Number(req.query.minPrice ?? req.query.priceMin ?? 0);
     const maxPrice = Number(req.query.maxPrice ?? req.query.priceMax ?? 0);
-    const sortMode = normalizeText(req.query.sort).toLowerCase() || "newest";
+    const searchQuery = normalizeText(req.query.q);
+    const sortMode = normalizeServiceSort(req.query.sort);
 
     const filtered = items
       .map((service) => attachServiceCover(service, req.locale))
       .filter((service) => {
         const ratingValue = Number(service.ratingAvg ?? 0);
         const effectivePrice = Number(service.salePrice ?? service.price ?? service.hourlyRate ?? 0);
+        const haystack = [
+          service.title,
+          service.description,
+          service.category,
+          service.location,
+          service.createdBy?.name,
+          service.createdBy?.username
+        ]
+          .map((value) => normalizeText(value))
+          .filter(Boolean)
+          .join(" ");
+        if (searchQuery && !haystack.includes(searchQuery)) return false;
         if (ratingMin > 0 && ratingValue < ratingMin) return false;
         if (minPrice > 0 && effectivePrice < minPrice) return false;
         if (maxPrice > 0 && effectivePrice > maxPrice) return false;
@@ -235,15 +276,19 @@ export const listServices = async (req: Request, res: Response) => {
     const total = filtered.length;
     const skip = (page - 1) * limit;
     const services = filtered.slice(skip, skip + limit);
+    const hasMore = skip + services.length < total;
 
     return res.json({
       page,
       limit,
       total,
       totalPages: Math.max(Math.ceil(total / limit), 1),
+      items: services,
       services,
+      hasMore,
+      nextCursor: hasMore ? String(page + 1) : null,
       uiMeta: buildListingUiMeta(req, "services", {
-        categoryKey: category || null,
+        categoryKey: uiCategory,
         resultCount: total,
         sortValue: sortMode
       })

@@ -78,7 +78,7 @@ export const buildAppliedFilters = (req: Request) => {
   const query = req.query;
   const filters = [
     ["category", normalizeMarketplaceCategory(query.category)],
-    ["subcategory", normalizeText(query.subcategory)],
+    ["subcategory", normalizeText(query.subcategory ?? query.subCategory)],
     ["brand", normalizeText(query.brand)],
     ["condition", normalizeText(query.condition)],
     ["location", normalizeText(query.location)],
@@ -93,7 +93,7 @@ export const buildAppliedFilters = (req: Request) => {
     ["verification", normalizeText(query.verification || query.verified)],
     ["minPrice", parseNumber(query.minPrice ?? query.priceMin)],
     ["maxPrice", parseNumber(query.maxPrice ?? query.priceMax)],
-    ["rating", parseNumber(query.rating)]
+    ["rating", parseNumber(query.rating ?? query.minRating)]
   ]
     .filter(([, value]) => value !== null && value !== "")
     .map(([key, value]) => ({

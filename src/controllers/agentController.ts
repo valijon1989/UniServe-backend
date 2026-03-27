@@ -120,6 +120,30 @@ const normalizeSlugArray = (value: unknown) => {
   return Array.from(new Set(normalized));
 };
 
+const resolveAgentReviewTarget = async (id: string) => {
+  let user = await User.findById(id).lean();
+  let profile = null as any;
+
+  if (user && user.role === "AGENT") {
+    profile = await AgentProfile.findOne({ user: user._id }).lean();
+  } else {
+    const profileById = await AgentProfile.findById(id).lean();
+    if (profileById) {
+      const userByProfile = await User.findById(profileById.user).lean();
+      if (userByProfile && userByProfile.role === "AGENT") {
+        user = userByProfile;
+        profile = profileById;
+      }
+    }
+  }
+
+  if (!user || user.role !== "AGENT") return null;
+  if (!profile) profile = await AgentProfile.findOne({ user: user._id }).lean();
+  if (!profile) return null;
+
+  return { user, profile };
+};
+
 const normalizeText = (value: unknown): string => String(value || "").trim();
 
 const buildAgentVerificationPayload = (profile: any) => ({
@@ -827,19 +851,33 @@ export const listAgentReviews = async (req: Request, res: Response) => {
     const page = parsePositiveInt(req.query.page, 1, 1000000);
     const limit = parsePositiveInt(req.query.limit, 10, 50);
     const skip = (page - 1) * limit;
+    const target = await resolveAgentReviewTarget(id);
+
+    if (!target) {
+      return res.status(404).json({ message: "Agent not found" });
+    }
 
     const [reviews, total] = await Promise.all([
-      AgentReview.find({ agentId: id })
+      AgentReview.find({ agentId: target.user._id })
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .populate("userId", "name username avatarUrl")
         .lean(),
-      AgentReview.countDocuments({ agentId: id })
+      AgentReview.countDocuments({ agentId: target.user._id })
     ]);
 
     const normalizedReviews = reviews.map((review: any) => ({
       ...review,
+      id: String(review?._id || ""),
+      agentId: String(target.user._id),
+      agentProfileId: String(target.profile._id),
+      user: review?.userId
+        ? {
+            ...review.userId,
+            avatarUrl: resolveAvatarUrl(review.userId.avatarUrl, review.userId._id)
+          }
+        : null,
       userId: review?.userId
         ? {
             ...review.userId,
@@ -867,9 +905,14 @@ export const upsertAgentReview = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "rating must be between 1 and 5" });
     }
 
-    const user = await User.findById(id).lean();
-    if (!user || user.role !== "AGENT") {
+    const target = await resolveAgentReviewTarget(id);
+    if (!target) {
       return res.status(404).json({ message: "Agent not found" });
+    }
+    const user = target.user;
+
+    if (String(req.user._id) === String(user._id)) {
+      return res.status(400).json({ message: "You cannot review your own agent profile" });
     }
 
     const review = await AgentReview.findOneAndUpdate(
@@ -891,7 +934,7 @@ export const upsertAgentReview = async (req: Request, res: Response) => {
 
     if (ratingStats.length) {
       await AgentProfile.updateOne(
-        { user: user._id },
+        { _id: target.profile._id },
         {
           $set: {
             rating: Number(ratingStats[0].avgRating.toFixed(2)),
@@ -901,7 +944,24 @@ export const upsertAgentReview = async (req: Request, res: Response) => {
       );
     }
 
-    return res.status(201).json({ review });
+    const populatedReview = await AgentReview.findById(review._id).populate("userId", "name username avatarUrl").lean();
+
+    return res.status(201).json({
+      review: populatedReview
+        ? {
+            ...populatedReview,
+            id: String(populatedReview._id),
+            agentId: String(user._id),
+            agentProfileId: String(target.profile._id),
+            user: populatedReview.userId
+              ? {
+                  ...(populatedReview.userId as any),
+                  avatarUrl: resolveAvatarUrl((populatedReview.userId as any).avatarUrl, (populatedReview.userId as any)._id)
+                }
+              : null
+          }
+        : review
+    });
   } catch (err) {
     console.error("upsertAgentReview error", err);
     return res.status(500).json({ message: "Server error" });

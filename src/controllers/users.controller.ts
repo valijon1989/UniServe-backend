@@ -12,12 +12,54 @@ import { respondAuthRequired } from "../utils/controllerResponses";
 const USERNAME_REGEX = /^[a-z0-9._-]{3,30}$/;
 const AVATAR_PUBLIC_PREFIX = "/api/media/avatars/";
 
+const normalizeText = (value: unknown) => {
+  if (typeof value !== "string") return "";
+  return value.trim();
+};
+
+const normalizeLanguages = (value: unknown) => {
+  if (Array.isArray(value)) {
+    return Array.from(
+      new Set(
+        value
+          .map((item) => (typeof item === "string" ? item.trim() : ""))
+          .filter(Boolean)
+      )
+    );
+  }
+
+  if (typeof value === "string") {
+    return Array.from(
+      new Set(
+        value
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean)
+      )
+    );
+  }
+
+  return null;
+};
+
 const toSafeUser = (value: unknown) => {
   const sanitized = sanitizeUser(value);
   if (!sanitized) return null;
   const id = String(sanitized.id || "user");
+  const languages = normalizeLanguages(sanitized.languages ?? sanitized.language) || [];
+  const location =
+    normalizeText(sanitized.location) ||
+    normalizeText(sanitized.region) ||
+    "";
+  const phone = normalizeText(sanitized.phone);
+
   return {
     ...sanitized,
+    phone,
+    location,
+    region: location,
+    languages,
+    language: languages.join(", "),
     avatarUrl: resolveAvatarUrl(sanitized.avatarUrl, id)
   };
 };
@@ -77,7 +119,18 @@ export const updateCurrentUserProfile = async (req: Request, res: Response) => {
         .json({ message: t(req, "users.profile.validation.avatar_direct_update.message") });
     }
 
-    const { name, bio, isPrivate, username, displayName } = req.body ?? {};
+    const {
+      name,
+      bio,
+      isPrivate,
+      username,
+      displayName,
+      phone,
+      location,
+      region,
+      languages,
+      language
+    } = req.body ?? {};
     const updates: Record<string, unknown> = {};
 
     if (name !== undefined) {
@@ -123,6 +176,31 @@ export const updateCurrentUserProfile = async (req: Request, res: Response) => {
       });
       if (exists) return res.status(409).json({ message: t(req, "users.profile.validation.username_taken.message") });
       updates.username = normalizedUsername;
+    }
+
+    if (phone !== undefined) {
+      if (typeof phone !== "string") {
+        return res.status(400).json({ message: t(req, "users.profile.validation.phone_string.message") });
+      }
+      updates.phone = phone.trim();
+    }
+
+    const rawLocation = location ?? region;
+    if (rawLocation !== undefined) {
+      if (typeof rawLocation !== "string") {
+        return res.status(400).json({ message: t(req, "users.profile.validation.location_string.message") });
+      }
+      const normalizedLocation = rawLocation.trim();
+      updates.location = normalizedLocation;
+      updates.region = normalizedLocation;
+    }
+
+    if (languages !== undefined || language !== undefined) {
+      const normalizedLanguages = normalizeLanguages(languages ?? language);
+      if (!normalizedLanguages) {
+        return res.status(400).json({ message: t(req, "users.profile.validation.languages_array.message") });
+      }
+      updates.languages = normalizedLanguages;
     }
 
     if (Object.keys(updates).length === 0) {

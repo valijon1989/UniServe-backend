@@ -40,7 +40,7 @@ import communityRoutes from "./routes/communityRoutes";
 import newsRoutes from "./routes/newsRoutes";
 import chatRoutes from "./routes/chatRoutes";
 import deliveryRoutes from "./routes/deliveryRoutes";
-import { initWebsocket } from "./utils/websocket";
+import { initWebsocket, SOCKET_IO_CLIENT_VERSION, SOCKET_PATH } from "./utils/websocket";
 import { seedIfEmpty } from "./seed";
 import { categoriesHandler, categoryLandingHandler } from "./stubs/categories";
 import { securityHeaders } from "./middlewares/securityHeaders";
@@ -176,7 +176,7 @@ async function start() {
     await seedIfEmpty();
 
     server = createServer(app);
-    const websocketServer = initWebsocket(server);
+    const websocketServer = initWebsocket(server, allowedOrigins);
     const shutdownController = createGracefulShutdown({
       server,
       websocketServer,
@@ -189,7 +189,7 @@ async function start() {
 
     const activePort = await listenWithPortRecovery(server, runtime);
     console.info(`[startup] UniServe backend listening on http://localhost:${activePort}`);
-    console.info(`[startup] WebSocket ready on ws://localhost:${activePort}/ws`);
+    console.info(`[startup] Socket.IO ready on http://localhost:${activePort} (path: ${SOCKET_PATH}, client: ${SOCKET_IO_CLIENT_VERSION})`);
   } catch (err) {
     logStartupError(err, runtime);
     if (server) {

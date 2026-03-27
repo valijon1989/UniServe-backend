@@ -19,19 +19,17 @@ import { reportServiceInteraction } from "../controllers/interactionReportContro
 
 const router = Router();
 
-router.use(authRequired);
-
-router.post("/", roleRequired(["AGENT"]), createService);
+router.post("/", authRequired, roleRequired(["AGENT"]), createService);
 router.get("/", listServices);
 router.get("/trending", getTrendingServices);
-router.get("/me", roleRequired(["AGENT", "ADMIN"]), myServices);
-router.get("/orders/my", listMyServiceOrders);
-router.get("/orders/incoming", roleRequired(["AGENT", "ADMIN"]), listIncomingServiceOrders);
-router.patch("/orders/:id/status", updateServiceOrderStatus);
+router.get("/me", authRequired, roleRequired(["AGENT", "ADMIN"]), myServices);
+router.get("/orders/my", authRequired, listMyServiceOrders);
+router.get("/orders/incoming", authRequired, roleRequired(["AGENT", "ADMIN"]), listIncomingServiceOrders);
+router.patch("/orders/:id/status", authRequired, updateServiceOrderStatus);
 router.get("/:identifier/reactions", getServiceReactionSummary);
-router.post("/:identifier/reactions", toggleServiceReaction);
-router.post("/:identifier/report", reportServiceInteraction);
-router.post("/:identifier/orders", createServiceOrder);
+router.post("/:identifier/reactions", authRequired, toggleServiceReaction);
+router.post("/:identifier/report", authRequired, reportServiceInteraction);
+router.post("/:identifier/orders", authRequired, createServiceOrder);
 router.get("/:identifier", getServiceDetail);
 
 export default router;

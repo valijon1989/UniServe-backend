@@ -122,6 +122,8 @@ const ICON_DEFINITIONS: Record<UiIconKey, { icon: string; symbol: string; label:
 };
 
 const FILTER_ICON_MAP: Record<string, UiIconKey> = {
+  category: "category",
+  subcategory: "subcategory",
   price: "price",
   brand: "brand",
   rating: "rating",
@@ -149,6 +151,8 @@ const FILTER_ICON_MAP: Record<string, UiIconKey> = {
 };
 
 const FILTER_LABELS: Record<string, LocalizedLabel> = {
+  category: { uz: "Kategoriya", ru: "Категория", en: "Category", ko: "카테고리" },
+  subcategory: { uz: "Subkategoriya", ru: "Подкатегория", en: "Subcategory", ko: "하위 카테고리" },
   price: { uz: "Narx", ru: "Цена", en: "Price", ko: "가격" },
   brand: { uz: "Brend", ru: "Бренд", en: "Brand", ko: "브랜드" },
   rating: { uz: "Reyting", ru: "Рейтинг", en: "Rating", ko: "평점" },

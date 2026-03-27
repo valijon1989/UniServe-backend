@@ -42,6 +42,9 @@ export interface IUser extends Document {
   isPrivate: boolean;
   avatarUrl?: string;
   bio?: string;
+  phone?: string;
+  location?: string;
+  languages: string[];
   region?: string;
   accountStatus: "ACTIVE" | "WARNED" | "RESTRICTED" | "SUSPENDED" | "BANNED";
   warningCount: number;
@@ -118,6 +121,9 @@ const UserSchema = new Schema<IUser>(
     isPrivate: { type: Boolean, default: false },
     avatarUrl: { type: String, default: "" },
     bio: { type: String },
+    phone: { type: String, trim: true, default: "" },
+    location: { type: String, trim: true, default: "" },
+    languages: { type: [String], default: [] },
     region: { type: String },
     accountStatus: {
       type: String,
